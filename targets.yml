@@ -1,4 +1,4 @@
-# Duta firmware build targets (QMK-style).
+# Duta firmware build targets.
 #
 # CI builds every target below on push/PR. Fork the repo, add your board here,
 # and you inherit the whole build system. `transport` is informational for now.
