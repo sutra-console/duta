@@ -176,12 +176,31 @@ with no `Error` state and uploads immediately.
 
 ```
 Duta.ino            app: DATA bridge + CMD parser + relays
-src/config.h             shared build flags (OLED on/off, pins)
+src/config.h             board selection + feature flags (ENABLE_OLED)
+src/board.h              dispatches to the selected board's pin map
+src/boards/*.h           per-board pin maps (weact_ch552, generic_ch552, custom)
 src/usb/USBconstant.*    dual-CDC descriptors (2× IAD, 4 interfaces)
 src/usb/USBhandler.*     EP0 control + EP1..EP4 dispatch + device cfg
 src/usb/USBCDC.*         per-port ring/endpoint data path (A=DATA, B=CMD)
 src/oled/ssd1306.*       SSD1306 bit-bang I2C text terminal (gated by ENABLE_OLED)
 ```
+
+## Boards / porting
+
+The pin map is the only board-specific part; everything else (USB, protocol,
+UART0 bridge) is board-agnostic. Pick a board near the top of
+[`src/config.h`](src/config.h) — default is **WeAct CH552**:
+
+```c
+//#define BOARD_GENERIC_CH552
+//#define BOARD_CUSTOM   // your own, from src/boards/custom.h
+```
+
+To add a board, copy `src/boards/custom.h`, fill in the pins (ch55xduino style:
+`Px.y → x*10+y`, e.g. `P3.4 → 34`), and select `BOARD_CUSTOM`. Each board header
+defines `RELAY1_PIN RELAY2_PIN RELAY_ACTIVE_LOW LED_PIN LED_ACTIVE_LOW
+OLED_SCL_PIN OLED_SDA_PIN OLED_I2C_ADDR`. Avoid **P3.6/P3.7** (USB) and
+**P3.0/P3.1** (UART0 bridge). `board.h` `#error`s if a required pin is missing.
 
 ## Notes / limitations
 
