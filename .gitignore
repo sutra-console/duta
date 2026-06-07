@@ -1,5 +1,7 @@
 # Build output
 /build/
+platforms/*/build/
+platforms/espressif/.pio/
 *.hex
 *.bin
 *.lst

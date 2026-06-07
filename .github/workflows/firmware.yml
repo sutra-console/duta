@@ -1,0 +1,67 @@
+name: firmware
+
+on:
+  push:
+    paths: ["platforms/**", "protocol/**", "targets.yml", ".github/workflows/firmware.yml"]
+  pull_request:
+    paths: ["platforms/**", "protocol/**", "targets.yml", ".github/workflows/firmware.yml"]
+  workflow_dispatch:
+
+jobs:
+  # ---- CH55x: the authoritative firmware build ----
+  ch55xduino:
+    runs-on: ubuntu-latest
+    env:
+      CH55X_URL: https://raw.githubusercontent.com/DeqingSun/ch55xduino/ch55xduino/package_ch55xduino_mcs51_index.json
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arduino-cli 1.0.4
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s 1.0.4
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Install CH55xDuino core
+        run: |
+          arduino-cli core update-index --additional-urls "$CH55X_URL"
+          arduino-cli core install CH55xDuino:mcs51 --additional-urls "$CH55X_URL"
+      - name: Compile (WeAct CH552, default board)
+        run: |
+          arduino-cli compile \
+            --fqbn "CH55xDuino:mcs51:ch552:usb_settings=user266" \
+            --warnings none \
+            platforms/ch55xduino
+
+  # ---- host/native reference: hardware-free, must build ----
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -B platforms/host/build platforms/host
+      - run: cmake --build platforms/host/build
+
+  # ---- ESP32 skeleton (scaffold; allowed to fail until fleshed out) ----
+  espressif:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: pip install --upgrade platformio
+      - run: pio run -d platforms/espressif -e esp32c3
+
+  # ---- Zephyr skeleton (scaffold; allowed to fail until fleshed out) ----
+  zephyr:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: Duta
+      - uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: Duta/platforms/zephyr
+          manifest-file-name: west.yml
+          toolchains: all
+      - run: west build -b native_sim Duta/platforms/zephyr
+        working-directory: ${{ github.workspace }}

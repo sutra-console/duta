@@ -1,0 +1,29 @@
+# Duta firmware build targets (QMK-style).
+#
+# CI builds every target below on push/PR. Fork the repo, add your board here,
+# and you inherit the whole build system. `transport` is informational for now.
+targets:
+  - platform: ch55xduino
+    board: weact_ch552
+    define: BOARD_WEACT_CH552
+    fqbn: CH55xDuino:mcs51:ch552:usb_settings=user266
+    transport: usb-dual-cdc
+
+  - platform: ch55xduino
+    board: generic_ch552
+    define: BOARD_GENERIC_CH552
+    fqbn: CH55xDuino:mcs51:ch552:usb_settings=user266
+    transport: usb-dual-cdc
+
+  - platform: espressif
+    board: esp32-c3-devkitm-1
+    env: esp32c3
+    transport: usb-serial
+
+  - platform: zephyr
+    board: native_sim
+    transport: tcp
+
+  - platform: host
+    board: native
+    transport: tcp

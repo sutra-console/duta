@@ -1,0 +1,18 @@
+# Minimal west manifest so CI (and a fresh checkout) can resolve Zephyr.
+# Inside an existing Zephyr workspace you don't need this — just `west build`.
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        # Keep the CI clone lean — only what native_sim needs.
+        name-allowlist:
+          - cmsis
+          - hal_nordic
+          - picolibc
+  self:
+    path: application
