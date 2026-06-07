@@ -48,4 +48,10 @@
 #define OLED_I2C_ADDR 0x3C
 #endif
 
+// Inputs are optional. A board declares them by defining INPUT_COUNT (>0) plus
+// INPUT_PINS / INPUT_TYPES (0=digital, 1=analog) / INPUT_NAMES arrays.
+#ifndef INPUT_COUNT
+#define INPUT_COUNT 0
+#endif
+
 #endif

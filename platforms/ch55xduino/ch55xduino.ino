@@ -157,6 +157,13 @@ __xdata uint8_t pbuf[BIN_BUF_SIZE];   // decoded request / built response (raw)
 __xdata uint8_t respBody[40];         // room for self-describe name strings
 __data uint8_t binLen = 0;
 
+// board-declared inputs (digital/analog) — used by INPUT_DESC/GET and WAITIO
+#if INPUT_COUNT > 0
+__code uint8_t inputPins[INPUT_COUNT] = INPUT_PINS;
+__code uint8_t inputTypes[INPUT_COUNT] = INPUT_TYPES; // 0 = digital, 1 = analog
+__code char *__code inputNames[INPUT_COUNT] = INPUT_NAMES;
+#endif
+
 #define M_IDLE 0
 #define M_ASCII 1
 #define M_BIN 2
@@ -170,6 +177,8 @@ __data uint8_t cmdMode = M_IDLE;
 #define T_OUT_GET 0x11
 #define T_OUT_TOG 0x12
 #define T_OUT_DESC 0x13 // self-describe: per-output {index, type, name}
+#define T_IN_DESC 0x14  // self-describe: per-input {index, type, name}
+#define T_IN_GET 0x15   // read an input value
 #define T_RESP 0x80
 #define ST_OK 0x00
 #define ST_BADCRC 0x01
@@ -301,7 +310,8 @@ static void handleBinFrame(void) {
     respBody[4] = 3;                           // n_outputs (R1,R2,LED)
     respBody[5] = 0;                           // eeprom KB (none yet)
     respBody[6] = 1;                           // proto_ver
-    sendResp(T_INFO | T_RESP, seq, 7);
+    respBody[7] = INPUT_COUNT;                 // n_inputs
+    sendResp(T_INFO | T_RESP, seq, 8);
     break;
   case T_OUT_SET: {
     __data uint8_t idx = pbuf[3], val = pbuf[4];
@@ -357,6 +367,46 @@ static void handleBinFrame(void) {
     while (*nm && n < sizeof(respBody))
       respBody[n++] = *nm++;
     sendResp(T_OUT_DESC | T_RESP, seq, n);
+    break;
+  }
+  case T_IN_DESC: {
+    __data uint8_t idx = pbuf[3];
+#if INPUT_COUNT > 0
+    if (idx < INPUT_COUNT) {
+      respBody[0] = ST_OK;
+      respBody[1] = idx;
+      respBody[2] = inputTypes[idx];
+      __code char *nm = inputNames[idx];
+      __data uint8_t n = 3;
+      while (*nm && n < sizeof(respBody))
+        respBody[n++] = *nm++;
+      sendResp(T_IN_DESC | T_RESP, seq, n);
+      break;
+    }
+#endif
+    respBody[0] = ST_BADARGS;
+    sendResp(T_IN_DESC | T_RESP, seq, 1);
+    break;
+  }
+  case T_IN_GET: {
+    __data uint8_t idx = pbuf[3];
+#if INPUT_COUNT > 0
+    if (idx < INPUT_COUNT) {
+      __data uint16_t v;
+      if (inputTypes[idx] == 1)
+        v = analogRead(inputPins[idx]);
+      else
+        v = digitalRead(inputPins[idx]) ? 1 : 0;
+      respBody[0] = ST_OK;
+      respBody[1] = idx;
+      respBody[2] = v & 0xFF;
+      respBody[3] = (v >> 8) & 0xFF;
+      sendResp(T_IN_GET | T_RESP, seq, 4);
+      break;
+    }
+#endif
+    respBody[0] = ST_BADARGS;
+    sendResp(T_IN_GET | T_RESP, seq, 1);
     break;
   }
   default:
@@ -417,6 +467,11 @@ void setup() {
   pinMode(RELAY1_PIN, OUTPUT);
   pinMode(RELAY2_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
+#if INPUT_COUNT > 0
+  for (uint8_t i = 0; i < INPUT_COUNT; i++)
+    if (inputTypes[i] == 0)
+      pinMode(inputPins[i], INPUT);
+#endif
   applyRelay(RELAY1_PIN, 0);
   applyRelay(RELAY2_PIN, 0);
   applyLed(0);

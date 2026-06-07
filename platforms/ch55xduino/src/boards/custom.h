@@ -20,4 +20,10 @@
 // Opt in to DATA-UART parity (none/odd/even) for legacy gear. Off by default.
 //#define PARITY_SUPPORT 1
 
+// Optional inputs for WAITIO (digital/analog). Example: an LDR on an ADC pin.
+//#define INPUT_COUNT 1
+//#define INPUT_PINS  { 11 }      // pin per input (e.g. P1.1)
+//#define INPUT_TYPES { 1 }       // 0 = digital, 1 = analog
+//#define INPUT_NAMES { "LDR" }
+
 #endif

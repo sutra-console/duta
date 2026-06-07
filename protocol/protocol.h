@@ -22,7 +22,9 @@ enum {
   TTLB_OUT_SET = 0x10,
   TTLB_OUT_GET = 0x11,
   TTLB_OUT_TOGGLE = 0x12,
-  TTLB_OUT_DESC = 0x13, // self-describe: {index, type, name}
+  TTLB_OUT_DESC = 0x13,  // self-describe output: {index, type, name}
+  TTLB_INPUT_DESC = 0x14, // self-describe input: {index, type, name}
+  TTLB_INPUT_GET = 0x15,  // read input value (digital 0/1, analog 0-1023)
   TTLB_SNIP_LIST = 0x20,
   TTLB_SNIP_META = 0x21,
   TTLB_SNIP_READ = 0x22,
@@ -52,8 +54,11 @@ enum {
   TTLB_CAP_PARITY = 0x08,
 };
 
-// ---- control types (OUT_DESC body[2]) ----
+// ---- output control types (OUT_DESC body[2]) ----
 enum { TTLB_CTRL_RELAY = 0, TTLB_CTRL_LED = 1, TTLB_CTRL_BUTTON = 2 };
+
+// ---- input types (INPUT_DESC body[2]) ----
+enum { TTLB_IN_DIGITAL = 0, TTLB_IN_ANALOG = 1 };
 
 // ---- CRC-8/ATM (poly 0x07, init 0x00) ----
 static inline uint8_t ttlb_crc8(const uint8_t *p, size_t n) {

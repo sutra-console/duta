@@ -83,10 +83,14 @@ A malformed or unknown request still gets a response (`TYPE|0x80`, `SEQ` echoed,
 | TYPE | name | request body | response body (after STATUS) |
 |------|------|--------------|------------------------------|
 | `0x01` | `PING` | — | `"PONG"` |
-| `0x02` | `INFO` | — | `fw_ver(2)`, `caps(1)`, `n_outputs(1)`, `eeprom_kb(1)`, `proto_ver(1)` |
+| `0x02` | `INFO` | — | `fw_ver(2)`, `caps(1)`, `n_outputs(1)`, `eeprom_kb(1)`, `proto_ver(1)`, `n_inputs(1)` |
+| `0x03` | `DEVICE_NAME` | — | device name string |
 | `0x10` | `OUTPUT_SET` | `index(1)`, `value(1)` | — | sets relay/LED. index: 0=R1,1=R2,2=LED |
 | `0x11` | `OUTPUT_GET` | — | `bitmap(1)` (bit0=R1,bit1=R2,bit2=LED) |
 | `0x12` | `OUTPUT_TOGGLE` | `index(1)` | `bitmap(1)` |
+| `0x13` | `OUTPUT_DESC` | `index(1)` | `index(1)`, `type(1)`, `name…` (type 0=relay, 1=led) |
+| `0x14` | `INPUT_DESC` | `index(1)` | `index(1)`, `type(1)`, `name…` (type 0=digital, 1=analog) |
+| `0x15` | `INPUT_GET` | `index(1)` | `index(1)`, `value(2)` (digital 0/1, analog 0-1023) |
 | `0x20` | `SNIP_LIST` | `start(1)` | `count(1)`, then repeated `{id(1), name_len(1), name…}` until frame full; more via next `start`. |
 | `0x21` | `SNIP_META` | `id(1)` | `id(1)`, `len(2)`, `name_len(1)`, `name…` |
 | `0x22` | `SNIP_READ` | `id(1)`, `off(2)`, `n(1)` | `bytes…` (n ≤ 64) |
@@ -102,7 +106,7 @@ A malformed or unknown request still gets a response (`TYPE|0x80`, `SEQ` echoed,
 
 Multi-byte integers are **little-endian** (matches SDCC and `x86`/`arm` hosts).
 
-`caps` bitfield (INFO): bit0=has-EEPROM, bit1=has-OLED, bit2=has-SPI-flash.
+`caps` bitfield (INFO): bit0=has-EEPROM, bit1=has-OLED, bit2=has-SPI-flash, bit3=parity.
 
 ---
 
