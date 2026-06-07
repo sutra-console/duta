@@ -1,0 +1,15 @@
+# Build output
+/build/
+*.hex
+*.bin
+*.lst
+*.map
+*.rel
+*.ihx
+
+# Arduino / arduino-cli
+.theia/
+*.tmp
+
+# Local pinned toolchain (see README)
+/.tools/
