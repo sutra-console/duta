@@ -1,10 +1,22 @@
-# Duta
+# Sutra & Duta
 
-A serial-console buddy: **firmware** that turns a cheap MCU into a smart USB-to-
-TTL adapter (transparent UART bridge + a control channel for relays/LED/GPIO and
-self-describe), and a **desktop app** that drives it — console, snippet/macro
-automation, and an embedded **MCP server** so an LLM can read the console and run
-commands.
+**Duta** — the firmware — is the *messenger* on the device. **Sutra** — the
+desktop app — is the *thread* that connects you (and an LLM) to it. They speak a
+shared [protocol](protocol/), so any Duta-class device works with Sutra
+regardless of MCU or transport (USB / TCP / BLE).
+
+> **sūtra** (Sanskrit सूत्र) — *"thread"; that which threads things together.*
+> **dūta** (Sanskrit दूत) — *"messenger / envoy"; the one who carries word.*
+
+**Duta** turns a cheap MCU into a smart USB-to-TTL adapter — a transparent UART
+bridge plus a control channel for relays/LED/GPIO/inputs and self-describe.
+**Sutra** drives it: console, snippet/macro automation, and an embedded **MCP
+server** so an LLM can read the console and run commands. The terse encoded lines
+those macros and protocol frames carry are themselves little *sutras*.
+
+> Names are new — the app still lives in [`Duta/`](Duta/) and the firmware
+> under [`platforms/`](platforms/) carries the old strings internally; a full
+> rename to Sutra/Duta is pending.
 
 The **[protocol](protocol/)** is the contract: any device that speaks it — over
 USB, TCP, or BLE — works with the app, regardless of MCU. So the same app drives
@@ -14,12 +26,12 @@ a CH552, an ESP32, or an nRF52840.
 
 ```
 protocol/        the wire contract — PROTOCOL.md + portable protocol.h
-platforms/       firmware, one impl per MCU/framework (all speak the protocol)
+platforms/       Duta firmware, one impl per MCU/framework (all speak the protocol)
   ch55xduino/      CH55x dual-CDC adapter  ✅ working
   espressif/       ESP32 (Arduino/PlatformIO)  🚧 scaffold
   zephyr/          nRF52840/ESP32/RP2040 (west)  🚧 scaffold
   host/            native reference over TCP  🚧 (hardware-free CI + TCP bridge)
-Duta/        desktop app (Tauri + React) — console, macros, MCP server
+Duta/        Sutra desktop app (Tauri + React) — console, macros, MCP server
 targets.yml      QMK-style list of CI build targets
 .github/         build-check CI matrix
 ```
