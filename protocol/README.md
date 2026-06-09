@@ -1,8 +1,8 @@
-# Duta protocol
+# skrit
 
-This is the **contract**. A "Duta" is *any* device that speaks this wire
+This is the **contract**. A "skrit" device is *any* device that speaks this wire
 protocol and answers the self-describe commands — regardless of MCU, framework,
-or transport. The desktop app ([`../Duta`](../Duta)) and every firmware
+or transport. The desktop app ([`../Duta`](../sutra)) and every firmware
 in [`../platforms`](../platforms) implement this and nothing app-specific.
 
 - **[PROTOCOL.md](PROTOCOL.md)** — the full spec: COBS/CRC framing, message

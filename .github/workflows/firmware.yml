@@ -57,11 +57,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: Duta
+          path: duta
       - uses: zephyrproject-rtos/action-zephyr-setup@v1
         with:
-          app-path: Duta/platforms/zephyr
+          app-path: duta/platforms/zephyr
           manifest-file-name: west.yml
           toolchains: all
-      - run: west build -b native_sim Duta/platforms/zephyr
+      - run: west build -b native_sim duta/platforms/zephyr
         working-directory: ${{ github.workspace }}

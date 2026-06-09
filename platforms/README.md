@@ -1,7 +1,7 @@
 # Platforms
 
 Each subdirectory is a firmware implementation of the
-[Duta protocol](../protocol/README.md) for a different MCU/framework. They
+[skrit protocol](../protocol/README.md) for a different MCU/framework. They
 all speak the same wire protocol, so the **same desktop app drives all of them**.
 
 | Platform | Framework / toolchain | Targets | Transports | Status |

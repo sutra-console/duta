@@ -1,4 +1,4 @@
-# Duta CMD-port wire protocol
+# skrit — CMD-port wire protocol
 
 The device exposes **two USB-CDC interfaces**:
 

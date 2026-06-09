@@ -5,7 +5,7 @@
 // Winsock shim for Windows.
 //
 //   cmake -B build && cmake --build build
-//   ./Duta-host [port]     (default 9555)
+//   ./duta-host [port]     (default 9555)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +24,7 @@
 #define DEV_NAME "Duta host"
 #define N_OUT 3
 static const char *const OUT_NAME[N_OUT] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[N_OUT] = {TTLB_CTRL_RELAY, TTLB_CTRL_RELAY, TTLB_CTRL_LED};
+static const uint8_t OUT_TYPE[N_OUT] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_LED};
 static uint8_t out_state = 0;
 
 // frame + send a response: 0x00 COBS(TYPE SEQ LEN BODY CRC8) 0x00
@@ -59,11 +59,11 @@ static void handle(int fd, const uint8_t *p, size_t n) {
   uint8_t r[64];
   uint8_t rl = 0;
   switch (typ) {
-  case TTLB_PING:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_PING:
+    r[rl++] = SKRIT_ST_OK;
     break;
-  case TTLB_INFO:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_INFO:
+    r[rl++] = SKRIT_ST_OK;
     r[rl++] = 1; // fw lo
     r[rl++] = 0; // fw hi
     r[rl++] = 0; // caps
@@ -71,49 +71,49 @@ static void handle(int fd, const uint8_t *p, size_t n) {
     r[rl++] = 0; // eeprom KB
     r[rl++] = 1; // proto
     break;
-  case TTLB_DEVICE_NAME:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_DEVICE_NAME:
+    r[rl++] = SKRIT_ST_OK;
     for (const char *s = DEV_NAME; *s; s++)
       r[rl++] = (uint8_t)*s;
     break;
-  case TTLB_OUT_GET:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_OUT_GET:
+    r[rl++] = SKRIT_ST_OK;
     r[rl++] = out_state;
     break;
-  case TTLB_OUT_SET:
+  case SKRIT_OUT_SET:
     if (len >= 2 && b[0] < N_OUT) {
       if (b[1])
         out_state |= (uint8_t)(1u << b[0]);
       else
         out_state &= (uint8_t)~(1u << b[0]);
-      r[rl++] = TTLB_ST_OK;
+      r[rl++] = SKRIT_ST_OK;
       r[rl++] = out_state;
     } else
-      r[rl++] = TTLB_ST_BADARGS;
+      r[rl++] = SKRIT_ST_BADARGS;
     break;
-  case TTLB_OUT_TOGGLE:
+  case SKRIT_OUT_TOGGLE:
     if (len >= 1 && b[0] < N_OUT) {
       out_state ^= (uint8_t)(1u << b[0]);
-      r[rl++] = TTLB_ST_OK;
+      r[rl++] = SKRIT_ST_OK;
       r[rl++] = out_state;
     } else
-      r[rl++] = TTLB_ST_BADARGS;
+      r[rl++] = SKRIT_ST_BADARGS;
     break;
-  case TTLB_OUT_DESC:
+  case SKRIT_OUT_DESC:
     if (len >= 1 && b[0] < N_OUT) {
-      r[rl++] = TTLB_ST_OK;
+      r[rl++] = SKRIT_ST_OK;
       r[rl++] = b[0];
       r[rl++] = OUT_TYPE[b[0]];
       for (const char *s = OUT_NAME[b[0]]; *s; s++)
         r[rl++] = (uint8_t)*s;
     } else
-      r[rl++] = TTLB_ST_BADARGS;
+      r[rl++] = SKRIT_ST_BADARGS;
     break;
   default:
-    r[rl++] = TTLB_ST_BADMSG;
+    r[rl++] = SKRIT_ST_BADMSG;
     break;
   }
-  send_frame(fd, (uint8_t)(typ | TTLB_RESP), seq, r, rl);
+  send_frame(fd, (uint8_t)(typ | SKRIT_RESP), seq, r, rl);
 }
 
 int main(int argc, char **argv) {

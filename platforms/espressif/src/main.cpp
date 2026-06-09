@@ -11,7 +11,7 @@ extern "C" {
 static const char *DEV_NAME = "Duta esp32";
 static const uint8_t N_OUT = 3;
 static const char *OUT_NAME[N_OUT] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[N_OUT] = {TTLB_CTRL_RELAY, TTLB_CTRL_RELAY, TTLB_CTRL_LED};
+static const uint8_t OUT_TYPE[N_OUT] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_LED};
 static uint8_t outState = 0;
 
 static void sendFrame(uint8_t typ, uint8_t seq, const uint8_t *body, uint8_t len) {
@@ -35,44 +35,44 @@ static void handle(const uint8_t *p, size_t n) {
   const uint8_t *b = p + 3;
   uint8_t r[64], rl = 0;
   switch (typ) {
-  case TTLB_PING:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_PING:
+    r[rl++] = SKRIT_ST_OK;
     break;
-  case TTLB_INFO:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_INFO:
+    r[rl++] = SKRIT_ST_OK;
     r[rl++] = 1; r[rl++] = 0; r[rl++] = 0; // fw 0.1, caps 0
     r[rl++] = N_OUT; r[rl++] = 0; r[rl++] = 1; // nout, eekb, proto
     break;
-  case TTLB_DEVICE_NAME:
-    r[rl++] = TTLB_ST_OK;
+  case SKRIT_DEVICE_NAME:
+    r[rl++] = SKRIT_ST_OK;
     for (const char *s = DEV_NAME; *s; s++) r[rl++] = (uint8_t)*s;
     break;
-  case TTLB_OUT_GET:
-    r[rl++] = TTLB_ST_OK; r[rl++] = outState;
+  case SKRIT_OUT_GET:
+    r[rl++] = SKRIT_ST_OK; r[rl++] = outState;
     break;
-  case TTLB_OUT_SET:
+  case SKRIT_OUT_SET:
     if (len >= 2 && b[0] < N_OUT) {
       if (b[1]) outState |= (1u << b[0]); else outState &= ~(1u << b[0]);
-      r[rl++] = TTLB_ST_OK; r[rl++] = outState;
-    } else r[rl++] = TTLB_ST_BADARGS;
+      r[rl++] = SKRIT_ST_OK; r[rl++] = outState;
+    } else r[rl++] = SKRIT_ST_BADARGS;
     break;
-  case TTLB_OUT_TOGGLE:
+  case SKRIT_OUT_TOGGLE:
     if (len >= 1 && b[0] < N_OUT) {
       outState ^= (1u << b[0]);
-      r[rl++] = TTLB_ST_OK; r[rl++] = outState;
-    } else r[rl++] = TTLB_ST_BADARGS;
+      r[rl++] = SKRIT_ST_OK; r[rl++] = outState;
+    } else r[rl++] = SKRIT_ST_BADARGS;
     break;
-  case TTLB_OUT_DESC:
+  case SKRIT_OUT_DESC:
     if (len >= 1 && b[0] < N_OUT) {
-      r[rl++] = TTLB_ST_OK; r[rl++] = b[0]; r[rl++] = OUT_TYPE[b[0]];
+      r[rl++] = SKRIT_ST_OK; r[rl++] = b[0]; r[rl++] = OUT_TYPE[b[0]];
       for (const char *s = OUT_NAME[b[0]]; *s; s++) r[rl++] = (uint8_t)*s;
-    } else r[rl++] = TTLB_ST_BADARGS;
+    } else r[rl++] = SKRIT_ST_BADARGS;
     break;
   default:
-    r[rl++] = TTLB_ST_BADMSG;
+    r[rl++] = SKRIT_ST_BADMSG;
     break;
   }
-  sendFrame(typ | TTLB_RESP, seq, r, rl);
+  sendFrame(typ | SKRIT_RESP, seq, r, rl);
 }
 
 static uint8_t acc[600];

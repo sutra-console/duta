@@ -13,7 +13,7 @@ The original Duta firmware: a WeAct **CH552** USB composite device exposing
 
 Two independent CDC-ACM interfaces (driverless `usbser.sys`), so you can stream
 serial on **DATA** while toggling a relay on **CMD** at the same time. The binary
-CMD wire protocol is the shared [Duta protocol](../../protocol/PROTOCOL.md);
+CMD wire protocol is the shared [skrit protocol](../../protocol/PROTOCOL.md);
 a line-based ASCII command set (below) also works for quick manual use.
 
 ## Wiring

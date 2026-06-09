@@ -10,6 +10,6 @@
 #include "protocol.h"
 
 int main(void) {
-  printk("Duta zephyr skeleton — protocol IDs ok (PING=0x%02x)\n", TTLB_PING);
+  printk("Duta zephyr skeleton — protocol IDs ok (PING=0x%02x)\n", SKRIT_PING);
   return 0;
 }
