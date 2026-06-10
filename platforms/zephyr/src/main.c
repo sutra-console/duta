@@ -50,7 +50,7 @@ static const struct gpio_dt_spec out_gpio[3] = {
     GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios, {0}), // Aux LED
 };
 static const char *const OUT_NAME[3] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_LED};
+static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_IO, SKRIT_CTRL_IO, SKRIT_CTRL_IO};
 static uint8_t g_out[3];
 
 // optional target reset/boot lines (drive a target's DTR/RTS-equivalent pins)

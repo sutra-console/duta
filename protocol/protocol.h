@@ -138,11 +138,14 @@ enum {
 enum { SKRIT_TIER_NONE = 0, SKRIT_TIER_REPLAY = 1, SKRIT_TIER_INTERACTIVE = 2, SKRIT_TIER_APP = 3 };
 
 // ---- output control types (OUT_DESC body[2]) ----
-// PWM and RGB outputs also answer OUT_SET/TOGGLE (0 = off, 1 = full/white). RGB
-// is an addressable-LED color via OUT_RGB; no caps bit — the type advertises it.
+// Typed by BEHAVIOR, not fixture: what a pin IS (relay, LED, fan, reset button)
+// goes in the descriptive name; the type says how it's driven. PWM and RGB
+// outputs also answer OUT_SET/TOGGLE (0 = off, 1 = full/white). RGB is an
+// addressable-LED color via OUT_RGB; no caps bit — the type advertises it.
 enum {
-  SKRIT_CTRL_RELAY = 0, SKRIT_CTRL_LED = 1, SKRIT_CTRL_BUTTON = 2,
-  SKRIT_CTRL_PWM = 3, SKRIT_CTRL_RGB = 4,
+  SKRIT_CTRL_IO = 0,  // digital on/off line
+  SKRIT_CTRL_PWM = 1, // duty-cycle output (OUT_PWM, 0..1023)
+  SKRIT_CTRL_RGB = 2, // addressable-LED strip (OUT_RGB, per-pixel)
 };
 // OUT_RGB pixel sentinel: address the whole strip (fill all pixels).
 #define SKRIT_RGB_ALL 0xFF

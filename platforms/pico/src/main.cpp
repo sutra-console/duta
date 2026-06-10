@@ -34,7 +34,7 @@ static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
 static uint8_t g_out[3]; // relay1, relay2, led
 
 static const char *const OUT_NAME[3] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_PWM};
+static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_IO, SKRIT_CTRL_IO, SKRIT_CTRL_PWM};
 static uint16_t g_pwm[3]; // duty 0..1023 (only the LED channel is PWM-capable)
 static const int8_t OUT_PIN[3] = {RELAY1_PIN, RELAY2_PIN, LED_PIN};
 

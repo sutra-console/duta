@@ -24,7 +24,7 @@
 #define DEV_NAME "Duta host"
 #define N_OUT 3
 static const char *const OUT_NAME[N_OUT] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[N_OUT] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_LED};
+static const uint8_t OUT_TYPE[N_OUT] = {SKRIT_CTRL_IO, SKRIT_CTRL_IO, SKRIT_CTRL_IO};
 static uint8_t out_state = 0;
 
 // frame + send a response: 0x00 COBS(TYPE SEQ LEN BODY CRC8) 0x00

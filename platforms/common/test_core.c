@@ -17,7 +17,7 @@ static void m_data(void*c,const uint8_t*p,uint16_t n){(void)c;memcpy(target_out+
 static uint16_t m_read(void*c,uint8_t*o,uint16_t cap){(void)c;uint16_t k=0;while(console_pos<console_n&&k<cap)o[k++]=console_in[console_pos++];return k;}
 static void m_oset(void*c,uint8_t i,uint8_t on){(void)c;outs[i]=on;}
 static uint8_t m_oget(void*c,uint8_t i){(void)c;return outs[i];}
-static void m_odesc(void*c,uint8_t i,uint8_t*t,const char**n){(void)c;(void)i;*t=SKRIT_CTRL_RELAY;*n="Relay";}
+static void m_odesc(void*c,uint8_t i,uint8_t*t,const char**n){(void)c;(void)i;*t=SKRIT_CTRL_IO;*n="Relay";}
 static uint16_t pwm[4];
 static uint8_t m_pwmset(void*c,uint8_t i,uint16_t d){(void)c;if(i!=2)return 0;pwm[i]=d;return 1;} // only idx 2 PWMs
 static uint16_t m_pwmget(void*c,uint8_t i){(void)c;return pwm[i];}

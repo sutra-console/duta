@@ -28,7 +28,7 @@ its outputs/inputs as a table of [`duta_io`](duta_io.h) descriptors, and
 
 ```c
 static const duta_io duta_outputs[] = {
-  { SKRIT_CTRL_RELAY, RELAY1_PIN, "Relay 1", DUTA_ACTIVE_LOW },
+  { SKRIT_CTRL_IO,  RELAY1_PIN, "Relay 1", DUTA_ACTIVE_LOW },
   { SKRIT_CTRL_PWM,   LED_PIN,    "Aux LED" },
   { SKRIT_CTRL_RGB,   RGB_PIN,    "RGB LED", 0, RGB_COUNT },
 };

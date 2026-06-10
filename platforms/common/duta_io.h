@@ -3,10 +3,11 @@
 // A board declares WHAT it has as tables of these descriptors, e.g.:
 //
 //   static const duta_io duta_outputs[] = {
-//     { SKRIT_CTRL_RELAY, RELAY1_PIN, "Relay 1", DUTA_ACTIVE_LOW },
-//     { SKRIT_CTRL_PWM,   LED_PIN,    "Aux LED" },
-//     { SKRIT_CTRL_RGB,   RGB_PIN,    "RGB LED", 0, RGB_COUNT },
+//     { SKRIT_CTRL_IO,  RELAY1_PIN, "Relay 1", DUTA_ACTIVE_LOW },
+//     { SKRIT_CTRL_PWM, LED_PIN,    "Aux LED" },
+//     { SKRIT_CTRL_RGB, RGB_PIN,    "RGB LED", 0, RGB_COUNT },
 //   };
+// (type is the *behavior* — IO/PWM/RGB; the fixture goes in the name.)
 //
 // The generic Arduino driver that turns these into skrit_hal IO callbacks lives
 // in duta_io_arduino.h (included by main.cpp after board.h). Splitting the type

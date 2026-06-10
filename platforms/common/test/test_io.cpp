@@ -8,7 +8,7 @@ int pin_level[64], pin_pwm[64], pin_mode_[64], awres;
 // board declares the tables...
 #define DUTA_HAVE_INPUTS
 static const duta_io duta_outputs[] = {
-  { SKRIT_CTRL_RELAY, 4, "Relay 1", DUTA_ACTIVE_LOW, 0 },
+  { SKRIT_CTRL_IO, 4, "Relay 1", DUTA_ACTIVE_LOW, 0 },
   { SKRIT_CTRL_PWM,   5, "Aux LED", 0, 0 },
 };
 static const duta_io duta_inputs[] = {
@@ -22,7 +22,7 @@ int main(void){
   assert(pin_level[4]==HIGH);                 // relay active-low: off => HIGH
   duta_io_out_set(0,0,1); assert(pin_level[4]==LOW && duta_io_out_get(0,0)==1);
   uint8_t t; const char*n; duta_io_out_desc(0,0,&t,&n);
-  assert(t==SKRIT_CTRL_RELAY && n[0]=='R');
+  assert(t==SKRIT_CTRL_IO && n[0]=='R');
   assert(duta_io_pwm_set(0,1,700)==1 && pin_pwm[5]==700 && duta_io_pwm_get(0,1)==700);
   assert(duta_io_out_get(0,1)==1);            // duty>0 => lit
   assert(duta_io_pwm_set(0,0,500)==0);        // reject pwm on a relay

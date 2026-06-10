@@ -61,7 +61,7 @@ typedef struct skrit_hal {
   uint8_t caps;        // SKRIT_CAP_* — MUST set CAP_MUX iff constructed muxed
   uint8_t macro_tier;  // 0..2: highest skrit-mc tier this build runs
   uint8_t store_kb;    // persistent macro store (KB); 0 = scratch-only
-  uint8_t n_outputs;   // controllable outputs (relays/LEDs/buttons)
+  uint8_t n_outputs;   // controllable outputs (digital on/off, PWM, or RGB)
   uint8_t n_inputs;    // readable inputs (digital/analog)
 
   // Transport out. The core has already framed these bytes (COBS + delimiters,
@@ -433,7 +433,7 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
   }
   case SKRIT_OUT_DESC: {
     if (len >= 1 && b[0] < h->n_outputs && h->out_desc) {
-      uint8_t ot = SKRIT_CTRL_RELAY;
+      uint8_t ot = SKRIT_CTRL_IO;
       const char *nm = "";
       h->out_desc(d->ctx, b[0], &ot, &nm);
       body[bl++] = SKRIT_ST_OK;
@@ -630,7 +630,7 @@ static void skrit__ascii_line(skrit_dev *d) {
     skrit__ascii_write(d, "\r\n");
   } else if (skrit__streq(d->line, "STATUS")) {
     for (uint8_t i = 0; i < h->n_outputs && i < 8; i++) {
-      uint8_t t = SKRIT_CTRL_RELAY; const char *nm = "";
+      uint8_t t = SKRIT_CTRL_IO; const char *nm = "";
       if (h->out_desc) h->out_desc(d->ctx, i, &t, &nm);
       skrit__ascii_write(d, nm);
       skrit__ascii_write(d, (h->out_get && h->out_get(d->ctx, i)) ? "=1 " : "=0 ");

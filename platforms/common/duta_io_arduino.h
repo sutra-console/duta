@@ -46,7 +46,7 @@ static CRGB duta_leds[DUTA_RGB_COUNT];
 #endif
 
 // per-output state owned by the driver
-static uint8_t duta_on[DUTA_MAX_OUTPUTS];    // relay/led/button latch
+static uint8_t duta_on[DUTA_MAX_OUTPUTS];    // digital on/off latch
 static uint16_t duta_duty[DUTA_MAX_OUTPUTS]; // pwm duty 0..DUTA_PWM_MAX
 
 // ---- helpers ---------------------------------------------------------------
@@ -85,7 +85,7 @@ static inline void duta_io_out_set(void *ctx, uint8_t idx, uint8_t on) {
     FastLED.show();
 #endif
     break;
-  default: // relay / led / button
+  default: // plain digital on/off (relay, LED, reset line — see the name)
     duta_on[idx] = on ? 1 : 0;
     duta__write_digital(io, on);
     break;
