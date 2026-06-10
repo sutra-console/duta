@@ -124,6 +124,13 @@ typedef struct skrit_hal {
   // default; trails the struct so positional initializers zero-fill it). ----
   uint8_t data_kind;     // SKRIT_DATA_*
   const char *data_name; // optional label; NULL -> a built-in name per kind
+
+  // ---- PWM frequency/resolution (NULL = fixed; OUTPUT_PWM duty still works) ----
+  //   pwm_config_get: report this output's current freq (Hz) + resolution (bits).
+  //   pwm_config_set: apply freq/res where supported (0 = leave); return 1 if the
+  //   output is PWM (even if a value couldn't change — the GET reports the truth).
+  void (*pwm_config_get)(void *ctx, uint8_t idx, uint32_t *freq, uint8_t *res);
+  uint8_t (*pwm_config_set)(void *ctx, uint8_t idx, uint32_t freq, uint8_t res);
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -573,6 +580,34 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     body[bl++] = b[0];
     body[bl++] = (uint8_t)(cur & 0xFF);
     body[bl++] = (uint8_t)(cur >> 8);
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
+  case SKRIT_PWM_CONFIG: {
+    // len 1 = read freq/res; len 6 = set (index, freq(4), res(1); 0 = leave)
+    if (!h->pwm_config_get) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1 || b[0] >= h->n_outputs) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    if (len >= 6) {
+      uint32_t freq = (uint32_t)b[1] | ((uint32_t)b[2] << 8) | ((uint32_t)b[3] << 16) |
+                      ((uint32_t)b[4] << 24);
+      if (!h->pwm_config_set || !h->pwm_config_set(d->ctx, b[0], freq, b[5])) {
+        skrit__status(d, type, seq, SKRIT_ST_BADARGS); // not a PWM output
+        break;
+      }
+    } else if (len != 1) {
+      skrit__status(d, type, seq, SKRIT_ST_BADARGS);
+      break;
+    }
+    uint32_t freq = 0;
+    uint8_t res = 0;
+    h->pwm_config_get(d->ctx, b[0], &freq, &res);
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = b[0];
+    body[bl++] = (uint8_t)(freq & 0xFF);
+    body[bl++] = (uint8_t)((freq >> 8) & 0xFF);
+    body[bl++] = (uint8_t)((freq >> 16) & 0xFF);
+    body[bl++] = (uint8_t)((freq >> 24) & 0xFF);
+    body[bl++] = res;
     skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
     break;
   }

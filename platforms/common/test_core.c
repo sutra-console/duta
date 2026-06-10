@@ -21,6 +21,9 @@ static void m_odesc(void*c,uint8_t i,uint8_t*t,const char**n){(void)c;(void)i;*t
 static uint16_t pwm[4];
 static uint8_t m_pwmset(void*c,uint8_t i,uint16_t d){(void)c;if(i!=2)return 0;pwm[i]=d;return 1;} // only idx 2 PWMs
 static uint16_t m_pwmget(void*c,uint8_t i){(void)c;return pwm[i];}
+static uint32_t cfg_freq=1000; static uint8_t cfg_res=10;
+static void m_pwmcfgget(void*c,uint8_t i,uint32_t*f,uint8_t*r){(void)c;if(i==2){*f=cfg_freq;*r=cfg_res;}else{*f=0;*r=0;}}
+static uint8_t m_pwmcfgset(void*c,uint8_t i,uint32_t f,uint8_t r){(void)c;if(i!=2)return 0;if(f)cfg_freq=f;if(r)cfg_res=r;return 1;}
 #define RGB_N 3 // mock rgb output (idx 2) has a 3-pixel strip
 static uint8_t rgb[RGB_N][3];
 static uint8_t m_rgbcount(void*c,uint8_t i){(void)c;return i==2?RGB_N:0;}
@@ -67,6 +70,7 @@ int main(void){
   hal.link_write=m_link;hal.data_write=m_data;hal.data_read=m_read;
   hal.out_set=m_oset;hal.out_get=m_oget;hal.out_desc=m_odesc;hal.millis=m_millis;
   hal.pwm_set=m_pwmset;hal.pwm_get=m_pwmget;
+  hal.pwm_config_get=m_pwmcfgget;hal.pwm_config_set=m_pwmcfgset;
   hal.rgb_count=m_rgbcount;hal.rgb_set=m_rgbset;hal.rgb_get=m_rgbget;
 
   // ---- MUX: PING ----
@@ -143,6 +147,19 @@ int main(void){
     link_n=0; feed_cmd(&dev,SKRIT_MACRO_RUN,16,run2,1,1); rn=last_resp(r,1);
     assert(r[3]==SKRIT_ST_OK && pwm[2]==1023); }
   printf("macro SETPWM ok\n");
+
+  // ---- PWM_CONFIG: read defaults, set freq/res, reject a non-pwm output ----
+  { uint8_t g[1]={2}; link_n=0; feed_cmd(&dev,SKRIT_PWM_CONFIG,40,g,1,1); last_resp(r,1);
+    uint32_t f = r[5]|(r[6]<<8)|(r[7]<<16)|((uint32_t)r[8]<<24);
+    assert(r[3]==SKRIT_ST_OK && r[4]==2 && f==1000 && r[9]==10);
+    uint8_t s[6]={2, 0x88,0x13,0,0, 8}; // freq 5000 (0x1388 LE), res 8
+    link_n=0; feed_cmd(&dev,SKRIT_PWM_CONFIG,41,s,6,1); last_resp(r,1);
+    f = r[5]|(r[6]<<8)|(r[7]<<16)|((uint32_t)r[8]<<24);
+    assert(r[3]==SKRIT_ST_OK && f==5000 && r[9]==8);
+    uint8_t bad[6]={0, 0x88,0x13,0,0, 8}; // a relay isn't pwm -> BADARGS
+    link_n=0; feed_cmd(&dev,SKRIT_PWM_CONFIG,42,bad,6,1); last_resp(r,1);
+    assert(r[3]==SKRIT_ST_BADARGS); }
+  printf("PWM_CONFIG get/set/reject ok\n");
 
   // ---- OUT_RGB: fill all, read back (with count), set one pixel, reject relay ----
   { uint8_t fill[4]={2, 0x12, 0x34, 0x56}; // len 4 = fill all pixels

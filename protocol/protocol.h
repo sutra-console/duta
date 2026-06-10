@@ -40,6 +40,8 @@ enum {
   SKRIT_OUT_PWM = 0x1A, // index(1)[, duty(2)]: with duty = set PWM 0..1023; without = read back duty(2)
   SKRIT_OUT_RGB = 0x1B, // index(1)[, [pixel(1),] r(1), g(1), b(1)] -> index, count(1), r, g, b
                         //   len 1 = read; len 4 = set all pixels; len 5 = set one pixel
+  SKRIT_PWM_CONFIG = 0x1C, // index(1)[, freq(4), res(1)] -> index, freq(4), res(1)
+                           //   len 1 = read config; len 6 = set freq/resolution (0 = leave)
   SKRIT_MACRO_LIST = 0x20,
   SKRIT_MACRO_META = 0x21,
   SKRIT_MACRO_READ = 0x22,

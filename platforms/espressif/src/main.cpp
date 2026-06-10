@@ -150,6 +150,8 @@ void setup() {
   beginTarget();
 
   HAL.caps = board_caps();
+  HAL.pwm_config_get = duta_io_pwm_config_get; // freq + resolution (trailing HAL fields)
+  HAL.pwm_config_set = duta_io_pwm_config_set;
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
 }
 

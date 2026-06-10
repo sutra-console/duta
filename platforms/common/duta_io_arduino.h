@@ -23,8 +23,18 @@
 #define DUTA_MAX_OUTPUTS 12
 #endif
 #ifndef DUTA_PWM_MAX
-#define DUTA_PWM_MAX 1023 // skrit PWM duty range; we set 10-bit resolution
+#define DUTA_PWM_MAX 1023 // wire duty range (normalized; independent of hw resolution)
 #endif
+#ifndef DUTA_PWM_FREQ
+#define DUTA_PWM_FREQ 1000 // default PWM frequency (Hz)
+#endif
+#ifndef DUTA_PWM_RES
+#define DUTA_PWM_RES 10 // default hardware resolution (bits)
+#endif
+// Current (settable) PWM frequency + resolution. Wire duty stays 0..DUTA_PWM_MAX;
+// duta__write_pwm rescales it to the hardware resolution.
+static uint32_t duta_pwm_freq = DUTA_PWM_FREQ;
+static uint8_t duta_pwm_res = DUTA_PWM_RES;
 
 #define DUTA_N_OUTPUTS ((uint8_t)(sizeof duta_outputs / sizeof duta_outputs[0]))
 #ifdef DUTA_HAVE_INPUTS
@@ -56,8 +66,20 @@ static inline void duta__write_digital(const duta_io *io, uint8_t on) {
 }
 
 static inline void duta__write_pwm(const duta_io *io, uint16_t duty) {
-  uint16_t v = (io->flags & DUTA_ACTIVE_LOW) ? (DUTA_PWM_MAX - duty) : duty;
-  analogWrite(io->pin, v);
+  uint32_t hwmax = (1u << duta_pwm_res) - 1; // rescale wire duty -> hardware range
+  uint32_t v = (uint32_t)duty * hwmax / DUTA_PWM_MAX;
+  if (io->flags & DUTA_ACTIVE_LOW) v = hwmax - v;
+  analogWrite(io->pin, (int)v);
+}
+
+// Apply the current PWM frequency + resolution to the analog peripheral.
+static inline void duta__pwm_apply(void) {
+#if defined(ARDUINO_ARCH_RP2040)
+  analogWriteFreq(duta_pwm_freq);
+#else
+  analogWriteFrequency(duta_pwm_freq); // ESP32 core global
+#endif
+  analogWriteResolution(duta_pwm_res);
 }
 
 #if DUTA_HAS_RGB
@@ -124,6 +146,29 @@ static inline uint16_t duta_io_pwm_get(void *ctx, uint8_t idx) {
   return idx < DUTA_N_OUTPUTS ? duta_duty[idx] : 0;
 }
 
+// PWM frequency + resolution (shared across the board's PWM outputs).
+static inline void duta_io_pwm_config_get(void *ctx, uint8_t idx, uint32_t *freq, uint8_t *res) {
+  (void)ctx;
+  if (idx < DUTA_N_OUTPUTS && duta_outputs[idx].type == SKRIT_CTRL_PWM) {
+    *freq = duta_pwm_freq;
+    *res = duta_pwm_res;
+  } else {
+    *freq = 0;
+    *res = 0;
+  }
+}
+static inline uint8_t duta_io_pwm_config_set(void *ctx, uint8_t idx, uint32_t freq, uint8_t res) {
+  (void)ctx;
+  if (idx >= DUTA_N_OUTPUTS || duta_outputs[idx].type != SKRIT_CTRL_PWM) return 0;
+  if (freq) duta_pwm_freq = freq;
+  if (res >= 1 && res <= 16) duta_pwm_res = res;
+  duta__pwm_apply();
+  // re-assert current duties at the new scale
+  for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++)
+    if (duta_outputs[i].type == SKRIT_CTRL_PWM) duta__write_pwm(&duta_outputs[i], duta_duty[i]);
+  return 1;
+}
+
 static inline uint8_t duta_io_rgb_count(void *ctx, uint8_t idx) {
   (void)ctx;
 #if DUTA_HAS_RGB
@@ -180,11 +225,7 @@ static inline uint16_t duta_io_in_get(void *ctx, uint8_t idx) {
 
 // Configure pins from the table. Call from setup() before skrit_dev_init.
 static inline void duta_io_begin(void) {
-#if defined(ARDUINO_ARCH_RP2040)
-  analogWriteRange(DUTA_PWM_MAX);
-#else
-  analogWriteResolution(10); // 0..1023, matches DUTA_PWM_MAX
-#endif
+  duta__pwm_apply(); // default PWM frequency + resolution
   for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++) {
     const duta_io *io = &duta_outputs[i];
     if (io->type == SKRIT_CTRL_RGB) continue; // driven by FastLED, not a GPIO
