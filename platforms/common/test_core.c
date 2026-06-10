@@ -40,6 +40,24 @@ static char g_pw[33]="duta"; static uint8_t g_pwlen=4, g_default=1;
 static uint8_t m_authchk(void*c,const char*p,uint8_t n){(void)c;return n==g_pwlen && memcmp(p,g_pw,n)==0;}
 static uint8_t m_authset(void*c,const char*p,uint8_t n){(void)c;if(n>32)return 0;memcpy(g_pw,p,n);g_pwlen=n;g_default=0;return 1;}
 static uint8_t m_authdef(void*c){(void)c;return g_default;}
+// mock provisioning: a 2-pin menu (pin 4 clean, pin 48 dual-use) + a 2-row table
+static const int16_t prov_pin[2]={4,48}; static const uint8_t prov_warn[2]={0,1};
+static const char* prov_name[2]={"","onboard WS2812"};
+static uint8_t prov_set_called=0, prov_reset=0;
+static uint8_t m_pincaps(void*c,uint8_t i,int16_t*pin,uint8_t*caps,uint8_t*warn,uint8_t*bus,const char**nm){
+  (void)c; if(i<2){*pin=prov_pin[i];*caps=SKRIT_PINCAP_DIGITAL|SKRIT_PINCAP_PWM;*warn=prov_warn[i];*bus=SKRIT_NO_BUS;*nm=prov_name[i];} return 2;}
+static uint8_t m_cfgget(void*c,uint8_t i,uint8_t*t,int16_t*pin,uint8_t*fl,uint16_t*arg,const char**nm){
+  (void)c;
+  if(i==0){*t=SKRIT_CTRL_IO;*pin=4;*fl=0;*arg=0;*nm="Relay";}
+  else if(i==1){*t=SKRIT_CTRL_PWM;*pin=5;*fl=0;*arg=0;*nm="LED";}
+  return 2;}
+static uint8_t m_cfgset(void*c,const uint8_t*body,uint8_t len,uint8_t*bad){
+  (void)c;(void)len; uint8_t n=body[0];
+  if(n==SKRIT_CONFIG_RESET){prov_reset=1;return SKRIT_ST_OK;}
+  const uint8_t*p=body+1; // each row: type(1),pin(2),flags(1),arg(2),namelen(1),name
+  for(uint8_t k=0;k<n;k++){ int16_t pin=(int16_t)(p[1]|(p[2]<<8));
+    if(pin!=4&&pin!=48){*bad=k;return SKRIT_ST_BADARGS;} p+=7+p[6]; }
+  prov_set_called=1; return SKRIT_ST_OK;}
 
 static skrit_hal hal = {0};
 static skrit_dev dev;
@@ -251,6 +269,48 @@ int main(void){
     assert((r[12] & SKRIT_FLAG_DEFAULT_CRED) == 0);
   }
   printf("AUTH gate/login/set/reset ok\n");
+
+  // ---- runtime provisioning: PIN_CAPS menu, CONFIG_GET table, CONFIG_SET ----
+  {
+    skrit_hal phal = hal;
+    phal.pin_caps = m_pincaps; phal.config_get = m_cfgget; phal.config_set = m_cfgset;
+    skrit_dev pdev; skrit_dev_init(&pdev, &phal, NULL, 1);
+
+    // INFO advertises the provision flag (flags = body[9] = r[12])
+    link_n = 0; feed_cmd(&pdev, SKRIT_INFO, 1, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK && (r[12] & SKRIT_FLAG_PROVISION));
+    // PIN_CAPS[0]: total 2, pin 4, caps digital|pwm, clean. body: st,idx,total,pinlo,pinhi,caps,warn,bus
+    { uint8_t a[1] = {0}; link_n = 0; feed_cmd(&pdev, SKRIT_PIN_CAPS, 2, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[4] == 0 && r[5] == 2);
+      assert(r[6] == 4 && r[7] == 0 && r[8] == (SKRIT_PINCAP_DIGITAL | SKRIT_PINCAP_PWM));
+      assert(r[9] == SKRIT_PIN_CLEAN && r[10] == SKRIT_NO_BUS); }
+    // PIN_CAPS[1]: dual-use -> warn + reason name "onboard WS2812" (name at r[11])
+    { uint8_t a[1] = {1}; link_n = 0; feed_cmd(&pdev, SKRIT_PIN_CAPS, 3, a, 1, 1); last_resp(r, 1);
+      assert(r[6] == 48 && r[9] == SKRIT_PIN_WARN && r[11] == 'o'); }
+    // PIN_CAPS past the end: just st,index,total (no tuple) -> LEN (r[2]) == 3
+    { uint8_t a[1] = {2}; link_n = 0; feed_cmd(&pdev, SKRIT_PIN_CAPS, 4, a, 1, 1); last_resp(r, 1);
+      assert(r[2] == 3 && r[4] == 2 && r[5] == 2); }
+    // CONFIG_GET[0]: type IO, pin 4, name "Relay". body: st,idx,n,type,pinlo,pinhi,flags,arglo,arghi,name
+    { uint8_t a[1] = {0}; link_n = 0; feed_cmd(&pdev, SKRIT_CONFIG_GET, 5, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[4] == 0 && r[5] == 2 && r[6] == SKRIT_CTRL_IO && r[7] == 4 && r[12] == 'R'); }
+    // CONFIG_SET a valid 1-row table {IO, pin 4, "X"} -> OK
+    { uint8_t row[] = {1, SKRIT_CTRL_IO, 4, 0, 0, 0, 0, 1, 'X'}; link_n = 0;
+      feed_cmd(&pdev, SKRIT_CONFIG_SET, 6, row, (uint8_t)sizeof row, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && prov_set_called == 1); }
+    // CONFIG_SET an off-menu pin (99) -> BADARGS + bad_index 0
+    { uint8_t row[] = {1, SKRIT_CTRL_IO, 99, 0, 0, 0, 0, 0}; link_n = 0;
+      feed_cmd(&pdev, SKRIT_CONFIG_SET, 7, row, (uint8_t)sizeof row, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_BADARGS && r[4] == 0); }
+    // CONFIG_SET reset sentinel -> OK + reset path taken
+    { uint8_t row[1] = {SKRIT_CONFIG_RESET}; link_n = 0;
+      feed_cmd(&pdev, SKRIT_CONFIG_SET, 8, row, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && prov_reset == 1); }
+    // a device without the provision callbacks answers UNSUPPORTED
+    skrit_dev ndev; skrit_dev_init(&ndev, &hal, NULL, 1);
+    { uint8_t a[1] = {0}; link_n = 0; feed_cmd(&ndev, SKRIT_PIN_CAPS, 9, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_UNSUPPORTED); }
+  }
+  printf("provisioning PIN_CAPS/CONFIG_GET/SET ok\n");
 
   printf("ALL CORE TESTS PASSED\n");
   return 0;

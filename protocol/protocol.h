@@ -42,6 +42,14 @@ enum {
                         //   len 1 = read; len 4 = set all pixels; len 5 = set one pixel
   SKRIT_PWM_CONFIG = 0x1C, // index(1)[, freq(4), res(1)] -> index, freq(4), res(1)
                            //   len 1 = read config; len 6 = set freq/resolution (0 = leave)
+  // ---- runtime provisioning (see "Provisioning" in PROTOCOL.md) ----
+  SKRIT_PIN_CAPS = 0x1D,   // index(1) -> index, total(1)[, pin(2), caps(1), warn(1), bus(1), name]
+                           //   the provisioning MENU: the offerable pins (mcu ∩ board)
+  SKRIT_CONFIG_GET = 0x1E, // index(1) -> index, n(1)[, type(1), pin(2), flags(1), arg(2), name]
+                           //   the CURRENT IO table, one row per index (0..n-1)
+  SKRIT_CONFIG_SET = 0x1F, // n(1), rows[n]{type(1), pin(2), flags(1), arg(2), namelen(1), name}
+                           //   replaces the IO table; n=SKRIT_CONFIG_RESET reverts to the compiled
+                           //   default. -> status[, bad_index(1)]. Takes effect after REBOOT.
   SKRIT_MACRO_LIST = 0x20,
   SKRIT_MACRO_META = 0x21,
   SKRIT_MACRO_READ = 0x22,
@@ -95,6 +103,7 @@ enum {
 enum {
   SKRIT_FLAG_AUTH_REQUIRED = 0x01, // AUTH needed before other commands / DATA
   SKRIT_FLAG_DEFAULT_CRED = 0x02,  // still the factory password — prompt a change
+  SKRIT_FLAG_PROVISION = 0x04,     // accepts runtime IO provisioning (PIN_CAPS/CONFIG_*)
 };
 // Factory default password (network devices ship with this; change on first use).
 #define SKRIT_DEFAULT_PASSWORD "duta"
@@ -183,6 +192,24 @@ enum {
   SKRIT_DATA_LOGIC = 5,     // logic-analyzer samples
   SKRIT_DATA_I2C = 6,       // I2C transactions (first non-UART backend target)
 };
+
+// ---- pin capability bits (PIN_CAPS `caps` byte) — what a pin's silicon can do.
+// The firmware mirrors these in duta_pincap.h (the per-mcu tables); the app reads
+// them to constrain the provisioning picker to valid roles for each pin.
+enum {
+  SKRIT_PINCAP_DIGITAL = 0x01, // digital in/out
+  SKRIT_PINCAP_ADC = 0x02,     // analog input
+  SKRIT_PINCAP_PWM = 0x04,     // PWM / LEDC
+  SKRIT_PINCAP_DAC = 0x08,     // true analog out
+  SKRIT_PINCAP_I2C = 0x10,     // I²C SDA/SCL (see `bus`)
+  SKRIT_PINCAP_SPI = 0x20,     // SPI signal
+  SKRIT_PINCAP_TOUCH = 0x40,   // capacitive touch
+};
+// PIN_CAPS `warn` byte: 0 = offer clean, 1 = offer but show the reason (the row's
+// name string carries the reason — a strapping/boot caution or a dual-use label).
+enum { SKRIT_PIN_CLEAN = 0, SKRIT_PIN_WARN = 1 };
+#define SKRIT_NO_BUS 0xFF       // PIN_CAPS `bus`: not a bus pin / matrix-routable
+#define SKRIT_CONFIG_RESET 0xFF // CONFIG_SET `n`: revert to the compiled-default table
 
 // ---- CRC-8/ATM (poly 0x07, init 0x00) ----
 static inline uint8_t skrit_crc8(const uint8_t *p, size_t n) {

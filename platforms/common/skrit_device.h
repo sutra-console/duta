@@ -131,6 +131,21 @@ typedef struct skrit_hal {
   //   output is PWM (even if a value couldn't change — the GET reports the truth).
   void (*pwm_config_get)(void *ctx, uint8_t idx, uint32_t *freq, uint8_t *res);
   uint8_t (*pwm_config_set)(void *ctx, uint8_t idx, uint32_t freq, uint8_t res);
+
+  // ---- runtime IO provisioning (all NULL = fixed board; pin_caps != NULL
+  // advertises SKRIT_FLAG_PROVISION and enables PIN_CAPS/CONFIG_GET/CONFIG_SET) ----
+  //   pin_caps:   the provisioning menu. Returns `total` offerable pins; when
+  //               index < total, fills the pin's resolved info (mcu ∩ board).
+  //   config_get: the current IO table. Returns row count `n`; when index < n,
+  //               fills that row (the read counterpart of config_set).
+  //   config_set: replace the IO table from a raw CONFIG_SET body (n + rows;
+  //               n=SKRIT_CONFIG_RESET reverts to default). Validates + persists.
+  //               Returns a SKRIT_ST_* status; on BADARGS, *bad_index = bad row.
+  uint8_t (*pin_caps)(void *ctx, uint8_t index, int16_t *pin, uint8_t *caps,
+                      uint8_t *warn, uint8_t *bus, const char **name);
+  uint8_t (*config_get)(void *ctx, uint8_t index, uint8_t *type, int16_t *pin,
+                        uint8_t *flags, uint16_t *arg, const char **name);
+  uint8_t (*config_set)(void *ctx, const uint8_t *body, uint8_t len, uint8_t *bad_index);
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -423,7 +438,8 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     body[bl++] = h->n_inputs;
     body[bl++] = h->macro_tier;
     body[bl++] = (h->auth_required ? SKRIT_FLAG_AUTH_REQUIRED : 0) |
-                 ((h->auth_is_default && h->auth_is_default(d->ctx)) ? SKRIT_FLAG_DEFAULT_CRED : 0);
+                 ((h->auth_is_default && h->auth_is_default(d->ctx)) ? SKRIT_FLAG_DEFAULT_CRED : 0) |
+                 (h->pin_caps ? SKRIT_FLAG_PROVISION : 0);
     skrit__respond(d, SKRIT_INFO | SKRIT_RESP, seq, body, bl);
     break;
   case SKRIT_AUTH:
@@ -608,6 +624,60 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     body[bl++] = (uint8_t)((freq >> 16) & 0xFF);
     body[bl++] = (uint8_t)((freq >> 24) & 0xFF);
     body[bl++] = res;
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
+  case SKRIT_PIN_CAPS: {
+    // index(1) -> status, index, total[, pin(2), caps, warn, bus, name] (the
+    // provisioning menu — offerable pins resolved from mcu ∩ board).
+    if (!h->pin_caps) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    int16_t pin = 0; uint8_t caps = 0, warn = 0, bus = SKRIT_NO_BUS; const char *nm = 0;
+    uint8_t total = h->pin_caps(d->ctx, b[0], &pin, &caps, &warn, &bus, &nm);
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = b[0];
+    body[bl++] = total;
+    if (b[0] < total) {
+      body[bl++] = (uint8_t)(pin & 0xFF);
+      body[bl++] = (uint8_t)((pin >> 8) & 0xFF);
+      body[bl++] = caps;
+      body[bl++] = warn;
+      body[bl++] = bus;
+      if (nm) while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+    }
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
+  case SKRIT_CONFIG_GET: {
+    // index(1) -> status, index, n[, type, pin(2), flags, arg(2), name] (current table row).
+    if (!h->config_get) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    uint8_t rtype = 0, flags = 0; int16_t pin = 0; uint16_t arg = 0; const char *nm = 0;
+    uint8_t nrows = h->config_get(d->ctx, b[0], &rtype, &pin, &flags, &arg, &nm);
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = b[0];
+    body[bl++] = nrows;
+    if (b[0] < nrows) {
+      body[bl++] = rtype;
+      body[bl++] = (uint8_t)(pin & 0xFF);
+      body[bl++] = (uint8_t)((pin >> 8) & 0xFF);
+      body[bl++] = flags;
+      body[bl++] = (uint8_t)(arg & 0xFF);
+      body[bl++] = (uint8_t)((arg >> 8) & 0xFF);
+      if (nm) while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+    }
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
+  case SKRIT_CONFIG_SET: {
+    // n(1), rows -> status[, bad_index]. The HAL validates against PIN_CAPS,
+    // persists, and applies on the next reboot. n=SKRIT_CONFIG_RESET = default.
+    if (!h->config_set) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    uint8_t bad = 0;
+    uint8_t st = h->config_set(d->ctx, b, len, &bad);
+    body[bl++] = st;
+    if (st == SKRIT_ST_BADARGS) body[bl++] = bad;
     skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
     break;
   }
