@@ -12,7 +12,7 @@ jobs:
   protocol-sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Diff against sutra-console/skrit @ main
         run: |
           git clone --depth 1 https://github.com/sutra-console/skrit /tmp/skrit
@@ -24,7 +24,7 @@ jobs:
   core:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build + run the core test (mock HAL)
         run: |
           cc -std=c11 -Wall -Wextra \
@@ -38,7 +38,7 @@ jobs:
     env:
       CH55X_URL: https://raw.githubusercontent.com/DeqingSun/ch55xduino/ch55xduino/package_ch55xduino_mcs51_index.json
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install arduino-cli 1.0.4
         run: |
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s 1.0.4
@@ -58,7 +58,7 @@ jobs:
   host:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: cmake -B platforms/host/build platforms/host
       - run: cmake --build platforms/host/build
 
@@ -69,8 +69,8 @@ jobs:
       matrix:
         env: [esp32s3, esp32c3, esp32]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - run: pip install --upgrade platformio
@@ -83,8 +83,8 @@ jobs:
       matrix:
         env: [pico, pico2]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - run: pip install --upgrade platformio
@@ -97,7 +97,7 @@ jobs:
       matrix:
         board: [native_sim, nrf52840dk/nrf52840]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: duta
       - uses: zephyrproject-rtos/action-zephyr-setup@v1
