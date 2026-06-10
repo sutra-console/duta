@@ -25,14 +25,14 @@ enum {
   SKRIT_OUT_DESC = 0x13,  // self-describe output: {index, type, name}
   SKRIT_INPUT_DESC = 0x14, // self-describe input: {index, type, name}
   SKRIT_INPUT_GET = 0x15,  // read input value (digital 0/1, analog 0-1023)
-  SKRIT_SNIP_LIST = 0x20,
-  SKRIT_SNIP_META = 0x21,
-  SKRIT_SNIP_READ = 0x22,
-  SKRIT_SNIP_WRITE_BEGIN = 0x23,
-  SKRIT_SNIP_WRITE_DATA = 0x24,
-  SKRIT_SNIP_WRITE_END = 0x25,
-  SKRIT_SNIP_DELETE = 0x26,
-  SKRIT_SNIP_RUN = 0x27,
+  SKRIT_MACRO_LIST = 0x20,
+  SKRIT_MACRO_META = 0x21,
+  SKRIT_MACRO_READ = 0x22,
+  SKRIT_MACRO_WRITE_BEGIN = 0x23,
+  SKRIT_MACRO_WRITE_DATA = 0x24,
+  SKRIT_MACRO_WRITE_END = 0x25,
+  SKRIT_MACRO_DELETE = 0x26,
+  SKRIT_MACRO_RUN = 0x27,
 };
 #define SKRIT_RESP 0x80
 
@@ -44,15 +44,41 @@ enum {
   SKRIT_ST_BADARGS = 0x03,
   SKRIT_ST_STORAGE = 0x04,
   SKRIT_ST_NOTFOUND = 0x05,
+  SKRIT_ST_BUSY = 0x06,
+  SKRIT_ST_UNSUPPORTED = 0x07, // skrit-mc tier/opcode above macro_tier
 };
 
 // ---- capability bits (INFO body[3]) ----
 enum {
-  SKRIT_CAP_EEPROM = 0x01,
+  SKRIT_CAP_STORE = 0x01,
   SKRIT_CAP_OLED = 0x02,
   SKRIT_CAP_SPI = 0x04,
   SKRIT_CAP_PARITY = 0x08,
 };
+
+// ---- skrit-mc macro bytecode (see PROTOCOL.md "Macro bytecode") ----
+// A program is: SKRIT_MC_VER(1), op..., SKRIT_MC_END. Multi-byte operands are LE.
+#define SKRIT_MC_VER 0x01
+#define SKRIT_MC_SCRATCH 0xFF // reserved volatile macro id for push-and-run
+enum {                        // opcodes (low nibble groups by tier)
+  SKRIT_MC_END = 0x00,        // halt (success)
+  SKRIT_MC_EMIT = 0x01,       // n(1), bytes[n]            -> DATA/UART   [tier 1]
+  SKRIT_MC_DELAY = 0x02,      // ms(2)                                    [tier 1]
+  SKRIT_MC_SETOUT = 0x03,     // index(1), val(1)                         [tier 1]
+  SKRIT_MC_EXPECT = 0x10,     // timeout(2), n(1), bytes[n] -> outcome    [tier 2]
+  SKRIT_MC_WAITIO = 0x11,     // index(1), cmp(1), val(2), timeout(2)     [tier 2]
+  SKRIT_MC_WAITOK = 0x12,     // halt FAIL if last outcome is FAIL        [tier 2]
+  SKRIT_MC_IF = 0x20,         // cond(1), skip(2)   reserved v2
+  SKRIT_MC_ELSE = 0x21,       // skip(2)            reserved v2
+  SKRIT_MC_ENDIF = 0x22,      // reserved v2
+};
+// WAITIO comparison ops (cmp byte) — matches the host Cmp order.
+enum {
+  SKRIT_MC_GT = 0, SKRIT_MC_LT = 1, SKRIT_MC_GE = 2,
+  SKRIT_MC_LE = 3, SKRIT_MC_EQ = 4, SKRIT_MC_NE = 5,
+};
+// highest tier a device VM runs (INFO macro_tier byte); 0 = no VM
+enum { SKRIT_TIER_NONE = 0, SKRIT_TIER_REPLAY = 1, SKRIT_TIER_INTERACTIVE = 2, SKRIT_TIER_APP = 3 };
 
 // ---- output control types (OUT_DESC body[2]) ----
 enum { SKRIT_CTRL_RELAY = 0, SKRIT_CTRL_LED = 1, SKRIT_CTRL_BUTTON = 2 };
