@@ -33,19 +33,35 @@ extern "C" {
 // S3/C3 the USB-CDC is `Serial`, leaving Serial1 free for the console.
 static HardwareSerial &TARGET = Serial1;
 
+// Index 3 (RGB LED) exists only on boards with an onboard NeoPixel (RGB_PIN >= 0).
+#define RGB_IDX 3
+#define N_OUTPUTS (RGB_PIN >= 0 ? 4 : 3)
+
 static uint32_t g_baud = 115200;
 static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
-static uint8_t g_out[3]; // relay1, relay2, led
+static uint8_t g_out[4]; // relay1, relay2, led, [rgb]
 
-static const char *const OUT_NAME[3] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_PWM};
-static const int8_t OUT_PIN[3] = {RELAY1_PIN, RELAY2_PIN, LED_PIN};
-static uint16_t g_pwm[3]; // duty 0..1023 (only the LED channel is PWM-capable)
+static const char *const OUT_NAME[4] = {"Relay 1", "Relay 2", "Aux LED", "RGB LED"};
+static const uint8_t OUT_TYPE[4] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_PWM, SKRIT_CTRL_RGB};
+static const int8_t OUT_PIN[4] = {RELAY1_PIN, RELAY2_PIN, LED_PIN, RGB_PIN};
+static uint16_t g_pwm[4]; // duty 0..1023 (the Aux LED channel)
+static uint8_t g_rgb[3];  // last RGB color (the RGB LED channel)
 
 static skrit_dev dev;
 
+static void applyRgb(uint8_t r, uint8_t g, uint8_t b) {
+#if RGB_PIN >= 0
+  g_rgb[0] = r; g_rgb[1] = g; g_rgb[2] = b;
+  g_out[RGB_IDX] = (r | g | b) ? 1 : 0;
+  neopixelWrite(RGB_PIN, r, g, b); // built into the ESP32 Arduino core
+#else
+  (void)r; (void)g; (void)b;
+#endif
+}
+
 // ---- helpers ---------------------------------------------------------------
 static void applyOut(uint8_t idx, uint8_t on) {
+  if (idx == RGB_IDX) { applyRgb(on ? 64 : 0, on ? 64 : 0, on ? 64 : 0); return; }
   if (idx > 2) return;
   g_out[idx] = on ? 1 : 0;
   g_pwm[idx] = on ? 1023 : 0; // a plain set snaps the duty to the rails
@@ -79,9 +95,9 @@ static uint16_t hal_data_read(void *, uint8_t *out, uint16_t cap) {
 }
 
 static void hal_out_set(void *, uint8_t idx, uint8_t on) { applyOut(idx, on); }
-static uint8_t hal_out_get(void *, uint8_t idx) { return idx < 3 ? g_out[idx] : 0; }
+static uint8_t hal_out_get(void *, uint8_t idx) { return idx < 4 ? g_out[idx] : 0; }
 static void hal_out_desc(void *, uint8_t idx, uint8_t *type, const char **name) {
-  if (idx > 2) return;
+  if (idx >= 4) return;
   *type = OUT_TYPE[idx];
   *name = OUT_NAME[idx];
 }
@@ -96,7 +112,18 @@ static uint8_t hal_pwm_set(void *, uint8_t idx, uint16_t duty) {
   analogWrite(OUT_PIN[idx], LED_ACTIVE_LOW ? (255 - v) : v);
   return 1;
 }
-static uint16_t hal_pwm_get(void *, uint8_t idx) { return idx < 3 ? g_pwm[idx] : 0; }
+static uint16_t hal_pwm_get(void *, uint8_t idx) { return idx < 4 ? g_pwm[idx] : 0; }
+
+// RGB via the ESP32 core's neopixelWrite() on the onboard WS2812.
+static uint8_t hal_rgb_set(void *, uint8_t idx, uint8_t r, uint8_t g, uint8_t b) {
+  if (idx != RGB_IDX || RGB_PIN < 0) return 0;
+  applyRgb(r, g, b);
+  return 1;
+}
+static void hal_rgb_get(void *, uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b) {
+  (void)idx;
+  *r = g_rgb[0]; *g = g_rgb[1]; *b = g_rgb[2];
+}
 
 static void hal_serial_get(void *, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop) {
   *baud = g_baud;
@@ -151,11 +178,12 @@ static const skrit_hal HAL = {
     /*caps*/ SKRIT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT | SKRIT_CAP_PWM,
     /*macro_tier*/ SKRIT_TIER_INTERACTIVE,
     /*store_kb*/ 0,
-    /*n_outputs*/ 3,
+    /*n_outputs*/ (uint8_t)N_OUTPUTS,
     /*n_inputs*/ 0,
     hal_link_write, hal_data_write, /*host_write*/ nullptr, hal_data_read,
     hal_out_set, hal_out_get, hal_out_desc,
     hal_pwm_set, hal_pwm_get,
+    hal_rgb_set, hal_rgb_get,
     /*in_desc*/ nullptr, /*in_get*/ nullptr,
     hal_serial_get, hal_serial_set, hal_serial_signal,
     hal_reboot,
@@ -164,10 +192,11 @@ static const skrit_hal HAL = {
 
 // ---- Arduino entry points --------------------------------------------------
 void setup() {
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < 3; i++) { // relays + Aux LED are plain GPIO
     pinMode(OUT_PIN[i], OUTPUT);
     applyOut(i, 0);
   }
+  if (RGB_PIN >= 0) applyRgb(0, 0, 0); // NeoPixel: neopixelWrite owns the pin
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
 
