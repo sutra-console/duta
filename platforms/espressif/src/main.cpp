@@ -16,7 +16,34 @@
 // is just the transport, serial, and reboot HAL plus the two-line main loop.
 #include <Arduino.h>
 
-#include "board.h"            // declares the duta_outputs[] table (+ RGB macros)
+#include "board.h"            // declares the duta_outputs[] table + mcu/board maps
+
+// Runtime provisioning: the IO table can be re-provisioned from the app and
+// persisted in NVS (Preferences). These store hooks must be defined before
+// duta_io_arduino.h (its loader calls them). See PROTOCOL.md "Provisioning".
+#define DUTA_PROVISION
+#define DUTA_HAVE_STORE
+#include <Preferences.h>
+static Preferences duta_prefs;
+static uint16_t duta_io_store_load(uint8_t *buf, uint16_t cap) {
+  if (!duta_prefs.begin("duta", true)) return 0;
+  size_t n = duta_prefs.getBytesLength("io");
+  uint16_t got = (n && n <= cap) ? (uint16_t)duta_prefs.getBytes("io", buf, n) : 0;
+  duta_prefs.end();
+  return got;
+}
+static uint8_t duta_io_store_save(const uint8_t *buf, uint16_t n) {
+  if (!duta_prefs.begin("duta", false)) return 0;
+  size_t w = duta_prefs.putBytes("io", buf, n);
+  duta_prefs.end();
+  return w == n;
+}
+static void duta_io_store_clear(void) {
+  if (!duta_prefs.begin("duta", false)) return;
+  duta_prefs.remove("io");
+  duta_prefs.end();
+}
+
 #include "duta_io_arduino.h"  // generic IO driver -> skrit_hal IO callbacks
 extern "C" {
 #include "skrit_device.h"
@@ -110,11 +137,12 @@ static void hal_reboot(void *, uint8_t mode) {
 static uint32_t hal_millis(void *) { return millis(); }
 static void hal_pump(void *) { yield(); }
 
-// caps: advertise PWM only if the board table actually has a PWM output.
+// caps: advertise PWM only if the active table actually has a PWM output. Runs
+// after duta_io_begin(), so duta_tbl reflects any provisioned table.
 static uint8_t board_caps() {
   uint8_t caps = SKRIT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT;
-  for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++)
-    if (duta_outputs[i].type == SKRIT_CTRL_PWM) caps |= SKRIT_CAP_PWM;
+  for (uint8_t i = 0; i < duta_tbl_n; i++)
+    if (duta_tbl[i].type == SKRIT_CTRL_PWM) caps |= SKRIT_CAP_PWM;
   return caps;
 }
 
@@ -149,9 +177,13 @@ void setup() {
   Serial.begin(115200); // USB-CDC (S3/C3) or UART0-USB (classic) — the mux link
   beginTarget();
 
+  HAL.n_outputs = duta_tbl_n; // a provisioned table may differ from the compiled default
   HAL.caps = board_caps();
   HAL.pwm_config_get = duta_io_pwm_config_get; // freq + resolution (trailing HAL fields)
   HAL.pwm_config_set = duta_io_pwm_config_set;
+  HAL.pin_caps = duta_io_pin_caps; // runtime provisioning (advertises FLAG_PROVISION)
+  HAL.config_get = duta_io_config_get;
+  HAL.config_set = duta_io_config_set;
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
 }
 

@@ -37,6 +37,12 @@ jobs:
             -I platforms/common/test -I platforms/common -I protocol \
             platforms/common/test/test_io.cpp -o /tmp/test_io
           /tmp/test_io
+      - name: Build + run the runtime-provisioning test (resolver + config + persistence)
+        run: |
+          c++ -std=c++17 -Wall -Wextra \
+            -I platforms/common/test -I platforms/common -I protocol \
+            platforms/common/test/test_provision.cpp -o /tmp/test_provision
+          /tmp/test_provision
 
   # ---- CH55x: the authoritative dual-CDC firmware build ----
   ch55xduino:

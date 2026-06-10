@@ -5,6 +5,12 @@
 // main.cpp includes board.h then this, and points the HAL's IO fields at the
 // duta_io_* functions — no hand-wired per-pin logic. Adding a relay is one row.
 //
+// The driver operates on an *active table* pointer (`duta_tbl`/`duta_tbl_n`) that
+// defaults to the board's compiled `duta_outputs[]`. Defining DUTA_PROVISION
+// repoints it at a RAM table loaded from persistence (runtime provisioning) and
+// supplies the pin_caps/config_get/config_set HAL callbacks. Without it, the
+// driver is byte-for-byte the compiled-table behavior.
+//
 // Shared by the Arduino platforms (espressif, pico). Zephyr drives IO from its
 // devicetree instead. Requires (from board.h, included first):
 //   static const duta_io duta_outputs[] = { ... };          // required
@@ -18,6 +24,10 @@
 
 #include "duta_io.h"
 #include "protocol.h"
+#ifdef DUTA_PROVISION
+#include <string.h>      // memcpy for the table loader / persistence
+#include "duta_pincap.h" // the mcu pin table + board overlay live here / in board.h
+#endif
 
 #ifndef DUTA_MAX_OUTPUTS
 #define DUTA_MAX_OUTPUTS 12
@@ -42,6 +52,12 @@ static uint8_t duta_pwm_res = DUTA_PWM_RES;
 #else
 #define DUTA_N_INPUTS 0
 #endif
+
+// Active output table. Defaults to the compiled board table; DUTA_PROVISION
+// repoints it at the RAM table in duta_io_load(). The const-view pointer accepts
+// both the const default and the RAM array.
+static const duta_io *duta_tbl = duta_outputs;
+static uint8_t duta_tbl_n = DUTA_N_OUTPUTS;
 
 #if defined(DUTA_RGB_PIN) && DUTA_RGB_PIN >= 0
 #define FASTLED_INTERNAL // silence the version banner
@@ -93,8 +109,8 @@ static inline uint8_t duta__rgb_lit(void) {
 // ---- skrit_hal IO callbacks (signatures match skrit_hal exactly) -----------
 static inline void duta_io_out_set(void *ctx, uint8_t idx, uint8_t on) {
   (void)ctx;
-  if (idx >= DUTA_N_OUTPUTS) return;
-  const duta_io *io = &duta_outputs[idx];
+  if (idx >= duta_tbl_n) return;
+  const duta_io *io = &duta_tbl[idx];
   switch (io->type) {
   case SKRIT_CTRL_PWM:
     duta_duty[idx] = on ? DUTA_PWM_MAX : 0; // a plain set snaps to the rails
@@ -116,8 +132,8 @@ static inline void duta_io_out_set(void *ctx, uint8_t idx, uint8_t on) {
 
 static inline uint8_t duta_io_out_get(void *ctx, uint8_t idx) {
   (void)ctx;
-  if (idx >= DUTA_N_OUTPUTS) return 0;
-  const duta_io *io = &duta_outputs[idx];
+  if (idx >= duta_tbl_n) return 0;
+  const duta_io *io = &duta_tbl[idx];
   if (io->type == SKRIT_CTRL_PWM) return duta_duty[idx] > 0;
 #if DUTA_HAS_RGB
   if (io->type == SKRIT_CTRL_RGB) return duta__rgb_lit();
@@ -127,29 +143,29 @@ static inline uint8_t duta_io_out_get(void *ctx, uint8_t idx) {
 
 static inline void duta_io_out_desc(void *ctx, uint8_t idx, uint8_t *type, const char **name) {
   (void)ctx;
-  if (idx >= DUTA_N_OUTPUTS) return;
-  *type = duta_outputs[idx].type;
-  *name = duta_outputs[idx].name;
+  if (idx >= duta_tbl_n) return;
+  *type = duta_tbl[idx].type;
+  *name = duta_tbl[idx].name;
 }
 
 static inline uint8_t duta_io_pwm_set(void *ctx, uint8_t idx, uint16_t duty) {
   (void)ctx;
-  if (idx >= DUTA_N_OUTPUTS || duta_outputs[idx].type != SKRIT_CTRL_PWM) return 0;
+  if (idx >= duta_tbl_n || duta_tbl[idx].type != SKRIT_CTRL_PWM) return 0;
   if (duty > DUTA_PWM_MAX) duty = DUTA_PWM_MAX;
   duta_duty[idx] = duty;
-  duta__write_pwm(&duta_outputs[idx], duty);
+  duta__write_pwm(&duta_tbl[idx], duty);
   return 1;
 }
 
 static inline uint16_t duta_io_pwm_get(void *ctx, uint8_t idx) {
   (void)ctx;
-  return idx < DUTA_N_OUTPUTS ? duta_duty[idx] : 0;
+  return idx < duta_tbl_n ? duta_duty[idx] : 0;
 }
 
 // PWM frequency + resolution (shared across the board's PWM outputs).
 static inline void duta_io_pwm_config_get(void *ctx, uint8_t idx, uint32_t *freq, uint8_t *res) {
   (void)ctx;
-  if (idx < DUTA_N_OUTPUTS && duta_outputs[idx].type == SKRIT_CTRL_PWM) {
+  if (idx < duta_tbl_n && duta_tbl[idx].type == SKRIT_CTRL_PWM) {
     *freq = duta_pwm_freq;
     *res = duta_pwm_res;
   } else {
@@ -159,20 +175,20 @@ static inline void duta_io_pwm_config_get(void *ctx, uint8_t idx, uint32_t *freq
 }
 static inline uint8_t duta_io_pwm_config_set(void *ctx, uint8_t idx, uint32_t freq, uint8_t res) {
   (void)ctx;
-  if (idx >= DUTA_N_OUTPUTS || duta_outputs[idx].type != SKRIT_CTRL_PWM) return 0;
+  if (idx >= duta_tbl_n || duta_tbl[idx].type != SKRIT_CTRL_PWM) return 0;
   if (freq) duta_pwm_freq = freq;
   if (res >= 1 && res <= 16) duta_pwm_res = res;
   duta__pwm_apply();
   // re-assert current duties at the new scale
-  for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++)
-    if (duta_outputs[i].type == SKRIT_CTRL_PWM) duta__write_pwm(&duta_outputs[i], duta_duty[i]);
+  for (uint8_t i = 0; i < duta_tbl_n; i++)
+    if (duta_tbl[i].type == SKRIT_CTRL_PWM) duta__write_pwm(&duta_tbl[i], duta_duty[i]);
   return 1;
 }
 
 static inline uint8_t duta_io_rgb_count(void *ctx, uint8_t idx) {
   (void)ctx;
 #if DUTA_HAS_RGB
-  if (idx < DUTA_N_OUTPUTS && duta_outputs[idx].type == SKRIT_CTRL_RGB) return DUTA_RGB_COUNT;
+  if (idx < duta_tbl_n && duta_tbl[idx].type == SKRIT_CTRL_RGB) return DUTA_RGB_COUNT;
 #else
   (void)idx;
 #endif
@@ -182,7 +198,7 @@ static inline uint8_t duta_io_rgb_count(void *ctx, uint8_t idx) {
 static inline uint8_t duta_io_rgb_set(void *ctx, uint8_t idx, uint8_t px, uint8_t r, uint8_t g, uint8_t b) {
   (void)ctx;
 #if DUTA_HAS_RGB
-  if (idx >= DUTA_N_OUTPUTS || duta_outputs[idx].type != SKRIT_CTRL_RGB) return 0;
+  if (idx >= duta_tbl_n || duta_tbl[idx].type != SKRIT_CTRL_RGB) return 0;
   if (px == SKRIT_RGB_ALL) {
     for (int i = 0; i < DUTA_RGB_COUNT; i++) duta_leds[i] = CRGB(r, g, b);
   } else if (px < DUTA_RGB_COUNT) {
@@ -223,11 +239,194 @@ static inline uint16_t duta_io_in_get(void *ctx, uint8_t idx) {
 }
 #endif
 
-// Configure pins from the table. Call from setup() before skrit_dev_init.
+// ===========================================================================
+// Runtime provisioning (DUTA_PROVISION) — the mcu ∩ board resolver, the current
+// table reader, and the validated table writer + persistence. The board header
+// supplies the mcu pin table (duta_mcu_pins / DUTA_MCU_NPINS) and the overlay
+// (DUTA_BROKEN_OUT_ALL or duta_board_broken_out[]; duta_board_uses[]/DUTA_USES_N).
+// ===========================================================================
+#ifdef DUTA_PROVISION
+#ifndef DUTA_NAME_POOL
+#define DUTA_NAME_POOL 192
+#endif
+#ifndef DUTA_USES_N
+#define DUTA_USES_N 0
+#endif
+
+static duta_io duta_io_ram[DUTA_MAX_OUTPUTS]; // the provisioned table (loaded at boot)
+static char duta_io_namepool[DUTA_NAME_POOL]; // RAM backing for provisioned names
+
+// Persistence hooks. A platform defines DUTA_HAVE_STORE + these three to persist
+// across reboots (ESP32 NVS, RP2040 LittleFS). The default is a RAM buffer —
+// provisioning works for the session but reverts on power-cycle.
+#ifndef DUTA_HAVE_STORE
+static uint8_t duta__store[DUTA_MAX_OUTPUTS * 40 + 8];
+static uint16_t duta__store_n = 0;
+static uint16_t duta_io_store_load(uint8_t *buf, uint16_t cap) {
+  if (duta__store_n == 0 || duta__store_n > cap) return 0;
+  memcpy(buf, duta__store, duta__store_n);
+  return duta__store_n;
+}
+static uint8_t duta_io_store_save(const uint8_t *buf, uint16_t n) {
+  if (n > sizeof duta__store) return 0;
+  memcpy(duta__store, buf, n);
+  duta__store_n = n;
+  return 1;
+}
+static void duta_io_store_clear(void) { duta__store_n = 0; }
+#endif
+
+// Is `pin` broken out on this board?
+static uint8_t duta__pin_broken_out(int16_t pin) {
+#ifdef DUTA_BROKEN_OUT_ALL
+  (void)pin;
+  return 1;
+#else
+  for (uint8_t i = 0; i < DUTA_BROKEN_OUT_N; i++)
+    if (duta_board_broken_out[i] == pin) return 1;
+  return 0;
+#endif
+}
+
+// The board-layer commitment for `pin`: DUTA_USE_NONE / FIXED / DUAL (+ label).
+static uint8_t duta__pin_use(int16_t pin, const char **what) {
+#if DUTA_USES_N > 0
+  for (uint8_t i = 0; i < DUTA_USES_N; i++)
+    if (duta_board_uses[i].pin == pin) {
+      if (what) *what = duta_board_uses[i].what;
+      return duta_board_uses[i].use;
+    }
+#else
+  (void)pin;
+#endif
+  if (what) *what = "";
+  return DUTA_USE_NONE;
+}
+
+// pin_caps HAL: enumerate the offerable pins (mcu ∩ board). Returns total; when
+// index < total, fills the index-th offerable pin's resolved info.
+static uint8_t duta_io_pin_caps(void *ctx, uint8_t index, int16_t *pin, uint8_t *caps,
+                                uint8_t *warn, uint8_t *bus, const char **name) {
+  (void)ctx;
+  uint8_t total = 0;
+  for (uint8_t i = 0; i < DUTA_MCU_NPINS; i++) {
+    const duta_pin *mp = &duta_mcu_pins[i];
+    if (mp->status == DUTA_PIN_FORBIDDEN) continue;
+    if (!duta__pin_broken_out(mp->pin)) continue;
+    const char *what = "";
+    uint8_t use = duta__pin_use(mp->pin, &what);
+    if (use == DUTA_USE_FIXED) continue; // committed + not reclaimable -> hidden
+    if (total == index) {               // this is the one the caller asked for
+      *pin = mp->pin;
+      *caps = mp->caps;
+      *bus = mp->bus;
+      if (use == DUTA_USE_DUAL) { *warn = SKRIT_PIN_WARN; *name = what; }
+      else if (mp->status == DUTA_PIN_CAUTION) { *warn = SKRIT_PIN_WARN; *name = "strapping/boot pin"; }
+      else { *warn = SKRIT_PIN_CLEAN; *name = ""; }
+    }
+    total++;
+  }
+  return total;
+}
+
+// config_get HAL: the current IO table, one row per index.
+static uint8_t duta_io_config_get(void *ctx, uint8_t index, uint8_t *type, int16_t *pin,
+                                  uint8_t *flags, uint16_t *arg, const char **name) {
+  (void)ctx;
+  if (index < duta_tbl_n) {
+    *type = duta_tbl[index].type;
+    *pin = duta_tbl[index].pin;
+    *flags = duta_tbl[index].flags;
+    *arg = duta_tbl[index].arg;
+    *name = duta_tbl[index].name;
+  }
+  return duta_tbl_n;
+}
+
+// Validate one provisioning row: the pin must be offerable, and the role must fit
+// the pin's caps. RGB is only allowed on the compiled RGB pin (FastLED is fixed).
+static uint8_t duta__row_ok(uint8_t type, int16_t pin) {
+  // find the pin in the mcu table
+  const duta_pin *mp = 0;
+  for (uint8_t i = 0; i < DUTA_MCU_NPINS; i++)
+    if (duta_mcu_pins[i].pin == pin) { mp = &duta_mcu_pins[i]; break; }
+  if (!mp || mp->status == DUTA_PIN_FORBIDDEN) return 0;
+  if (!duta__pin_broken_out(pin)) return 0;
+  if (duta__pin_use(pin, 0) == DUTA_USE_FIXED) return 0;
+  if (type == SKRIT_CTRL_IO) return (mp->caps & DUTA_CAP_DIGITAL) ? 1 : 0;
+  if (type == SKRIT_CTRL_PWM) return (mp->caps & DUTA_CAP_PWM) ? 1 : 0;
+#if DUTA_HAS_RGB
+  if (type == SKRIT_CTRL_RGB) return pin == DUTA_RGB_PIN; // fixed FastLED pin only
+#endif
+  return 0;
+}
+
+// config_set HAL: validate + persist a new table (body = n + rows). n=RESET wipes.
+static uint8_t duta_io_config_set(void *ctx, const uint8_t *body, uint8_t len, uint8_t *bad_index) {
+  (void)ctx;
+  if (len < 1) return SKRIT_ST_BADARGS;
+  uint8_t n = body[0];
+  if (n == SKRIT_CONFIG_RESET) { duta_io_store_clear(); return SKRIT_ST_OK; }
+  if (n > DUTA_MAX_OUTPUTS) return SKRIT_ST_BADARGS;
+  // walk + validate each row: {type(1), pin(2), flags(1), arg(2), namelen(1), name}
+  const uint8_t *p = body + 1;
+  const uint8_t *end = body + len;
+  for (uint8_t k = 0; k < n; k++) {
+    if (p + 7 > end) { *bad_index = k; return SKRIT_ST_BADARGS; }
+    uint8_t type = p[0];
+    int16_t pin = (int16_t)(p[1] | (p[2] << 8));
+    uint8_t namelen = p[6];
+    if (p + 7 + namelen > end) { *bad_index = k; return SKRIT_ST_BADARGS; }
+    if (!duta__row_ok(type, pin)) { *bad_index = k; return SKRIT_ST_BADARGS; }
+    p += 7 + namelen;
+  }
+  return duta_io_store_save(body, len) ? SKRIT_ST_OK : SKRIT_ST_STORAGE;
+}
+
+// Load the persisted table into duta_io_ram and repoint the active table at it.
+// No persisted config (or a malformed one) -> the compiled default stays active.
+static void duta_io_load(void) {
+  uint8_t buf[DUTA_MAX_OUTPUTS * 40 + 8];
+  uint16_t k = duta_io_store_load(buf, sizeof buf);
+  if (k < 1) return; // nothing stored -> keep the compiled default
+  uint8_t n = buf[0];
+  if (n == SKRIT_CONFIG_RESET || n > DUTA_MAX_OUTPUTS) return;
+  const uint8_t *p = buf + 1;
+  const uint8_t *end = buf + k;
+  uint16_t pool = 0;
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < n; i++) {
+    if (p + 7 > end) return; // malformed -> fall back to default
+    uint8_t namelen = p[6];
+    if (p + 7 + namelen > end) return;
+    duta_io *row = &duta_io_ram[count];
+    row->type = p[0];
+    row->pin = (int16_t)(p[1] | (p[2] << 8));
+    row->flags = p[3];
+    row->arg = (uint16_t)(p[4] | (p[5] << 8));
+    // copy the name into the RAM pool (NUL-terminated)
+    if (pool + namelen + 1 > DUTA_NAME_POOL) return;
+    char *nm = &duta_io_namepool[pool];
+    memcpy(nm, p + 7, namelen);
+    nm[namelen] = 0;
+    row->name = nm;
+    pool += namelen + 1;
+    p += 7 + namelen;
+    count++;
+  }
+  duta_tbl = duta_io_ram;
+  duta_tbl_n = count;
+}
+#endif // DUTA_PROVISION
+
+// Configure pins from the active table. Call from setup() before skrit_dev_init.
 static inline void duta_io_begin(void) {
+#ifdef DUTA_PROVISION
+  duta_io_load(); // swap in a provisioned table if one is persisted
+#endif
   duta__pwm_apply(); // default PWM frequency + resolution
-  for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++) {
-    const duta_io *io = &duta_outputs[i];
+  for (uint8_t i = 0; i < duta_tbl_n; i++) {
+    const duta_io *io = &duta_tbl[i];
     if (io->type == SKRIT_CTRL_RGB) continue; // driven by FastLED, not a GPIO
     pinMode(io->pin, OUTPUT);
     duta_io_out_set(NULL, i, 0);
