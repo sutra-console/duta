@@ -58,7 +58,8 @@ jobs:
       - name: Install CH55xDuino core
         run: |
           arduino-cli core update-index --additional-urls "$CH55X_URL"
-          arduino-cli core install CH55xDuino:mcs51 --additional-urls "$CH55X_URL"
+          # Pinned for reproducible builds — bump deliberately, not on upstream's schedule.
+          arduino-cli core install CH55xDuino:mcs51@0.0.25 --additional-urls "$CH55X_URL"
       - name: Compile (WeAct CH552, default board)
         run: |
           arduino-cli compile \
@@ -80,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        env: [esp32s3, esp32c3, esp32]
+        env: [esp32s3, s3zero, esp32c3, esp32]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

@@ -89,13 +89,22 @@ static inline void duta__write_pwm(const duta_io *io, uint16_t duty) {
 }
 
 // Apply the current PWM frequency + resolution to the analog peripheral.
+// arduino-esp32 3.x made these PER-PIN (and they need the LEDC channel already
+// attached, i.e. call after the first analogWrite); 2.x and RP2040 are global.
 static inline void duta__pwm_apply(void) {
 #if defined(ARDUINO_ARCH_RP2040)
   analogWriteFreq(duta_pwm_freq);
-#else
-  analogWriteFrequency(duta_pwm_freq); // ESP32 core global
-#endif
   analogWriteResolution(duta_pwm_res);
+#elif defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  for (uint8_t i = 0; i < duta_tbl_n; i++)
+    if (duta_tbl[i].type == SKRIT_CTRL_PWM) {
+      analogWriteFrequency((uint8_t)duta_tbl[i].pin, duta_pwm_freq);
+      analogWriteResolution((uint8_t)duta_tbl[i].pin, duta_pwm_res);
+    }
+#else
+  analogWriteFrequency(duta_pwm_freq); // ESP32 core 2.x global
+  analogWriteResolution(duta_pwm_res);
+#endif
 }
 
 #if DUTA_HAS_RGB
@@ -432,13 +441,13 @@ static inline void duta_io_begin(void) {
 #ifdef DUTA_PROVISION
   duta_io_load(); // swap in a provisioned table if one is persisted
 #endif
-  duta__pwm_apply(); // default PWM frequency + resolution
   for (uint8_t i = 0; i < duta_tbl_n; i++) {
     const duta_io *io = &duta_tbl[i];
     if (io->type == SKRIT_CTRL_RGB) continue; // driven by FastLED, not a GPIO
     pinMode(io->pin, OUTPUT);
-    duta_io_out_set(NULL, i, 0);
+    duta_io_out_set(NULL, i, 0); // PWM rows: first analogWrite attaches the channel
   }
+  duta__pwm_apply(); // default PWM frequency + resolution (per-pin on esp32 core 3.x)
 #if DUTA_HAS_RGB
   FastLED.addLeds<WS2812, DUTA_RGB_PIN, GRB>(duta_leds, DUTA_RGB_COUNT);
   FastLED.setBrightness(255);

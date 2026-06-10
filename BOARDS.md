@@ -72,6 +72,19 @@ picker renders the menu with **zero hardcoded chip knowledge**. Two special rule
 
 Steps 1–2 are upstreamable facts anyone can reuse; step 3 is the only Duta opinion.
 
+## Why ch55xduino is its own platform (not PlatformIO)
+
+The platform axis is **build reality**, and the CH55x's build reality is genuinely its
+own: an 8051 (MCS-51) part compiled with **SDCC** through the **ch55xduino** Arduino
+core, driven by `arduino-cli` — not PlatformIO. PlatformIO's `intel_mcs51` platform has
+no maintained ch55xduino framework integration (community recipes hand-roll board JSONs
+against it); adopting that would trade a supported upstream toolchain for a fragile
+fork we'd maintain ourselves. So it stays a sibling of `espressif`/`pico`/`zephyr`,
+equal in the layout, different in toolchain — with the **core version pinned** in CI
+(`CH55xDuino:mcs51@<ver>`) so builds are reproducible and upgrades are deliberate.
+The boards/targets layering applies inside it the same as everywhere else; it's just
+compile-time only (no runtime provisioning — no room).
+
 ## Zephyr is native
 
 Zephyr has its own board concept, so the nRF platform stays on Zephyr's mechanism:
