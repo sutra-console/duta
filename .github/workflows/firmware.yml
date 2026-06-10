@@ -60,13 +60,14 @@ jobs:
             --warnings none \
             platforms/ch55xduino
 
-  # ---- host/native reference: hardware-free, must build ----
+  # ---- host/native reference (WebSocket): hardware-free, must build + test ----
   host:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - run: cmake -B platforms/host/build platforms/host
       - run: cmake --build platforms/host/build
+      - run: ctest --test-dir platforms/host/build --output-on-failure
 
   # ---- ESP32 family (Arduino/PlatformIO) ----
   espressif:

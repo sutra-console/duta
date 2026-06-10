@@ -52,8 +52,8 @@ targets:
 
   - platform: zephyr
     board: native_sim
-    transport: tcp
+    transport: build-check
 
   - platform: host
     board: native
-    transport: tcp
+    transport: websocket

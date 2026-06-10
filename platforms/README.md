@@ -11,8 +11,8 @@ all speak the same wire protocol, so the **same desktop app drives all of them**
 | [`espressif`](espressif) | Arduino / PlatformIO | ESP32 / S3 / C3 | USB mux | ✅ working |
 | [`pico`](pico) | arduino-pico / PlatformIO | RP2040 / RP2350 | USB mux | ✅ working |
 | [`zephyr`](zephyr) | west + Zephyr SDK | nRF52840 (DK + dongle) | USB mux | ✅ working |
-| [`host`](host) | CMake (native C) | Linux/macOS/Windows | TCP | ✅ reference |
-| `micropython` | mpy-cross | RP2040 / ESP32 | USB mux · TCP · BLE | ⬜ planned |
+| [`host`](host) | CMake (native C) | Linux/macOS/Windows | WebSocket | ✅ reference |
+| `micropython` | mpy-cross | RP2040 / ESP32 | USB mux · WebSocket · BLE | ⬜ planned |
 
 Everything except `ch55xduino` (which has cheap composite-USB silicon) and the planned
 MicroPython port builds on the [`common`](common) core; new C/C++ ports should too.

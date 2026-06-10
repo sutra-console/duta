@@ -49,8 +49,9 @@ GPREGRET→DFU on nRF52) · scratch (`0xFF`) macro push-and-run via the shared s
 
 ## Roadmap
 
-- **BLE NUS transport** — *scaffolded* (`overlay-ble.conf`); needs on-hardware validation
-  (notify flow-control, MTU negotiation, pairing/bonding policy) and app-side BLE support.
+- **BLE NUS transport** — *scaffolded* (`overlay-ble.conf`); the Sutra app has a BLE
+  central (Scan ▸ connect). Needs on-hardware validation: notify flow-control, MTU
+  negotiation, pairing/bonding policy.
 - **Dual CDC ACM** — a second `cdc_acm_uart` instance for a raw, un-muxed DATA port that
   plain terminals can open directly.
 - **Persistent macros** — back the `0x00..0xFE` ids with the settings/NVS subsystem.

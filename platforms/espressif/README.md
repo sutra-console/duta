@@ -39,7 +39,7 @@ S3/C3) · `MACRO_WRITE_*`/`MACRO_RUN` for scratch (`0xFF`) push-and-run.
 
 - **Persistent macros** — back the `0x00..0xFE` macro ids with NVS/LittleFS (the core
   already has the VM; just needs a storage hook).
-- **WiFi-TCP "bridge mode"** — accept a TCP client and feed a second muxed `skrit_dev`,
+- **WiFi WebSocket "bridge mode"** — run a WS server (esp_http_server) feeding a muxed `skrit_dev`,
   so Sutra can reach the target over the network (mirrors [`../host`](../host)).
 - **BLE NUS** — the same mux stream over a GATT pipe.
 - **Analog inputs** — populate `n_inputs` + the `in_*` HAL callbacks (e.g. an LDR for

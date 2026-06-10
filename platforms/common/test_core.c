@@ -32,6 +32,11 @@ static uint8_t m_rgbset(void*c,uint8_t i,uint8_t px,uint8_t r,uint8_t g,uint8_t 
 static void m_rgbget(void*c,uint8_t i,uint8_t px,uint8_t*r,uint8_t*g,uint8_t*b){
   (void)c;(void)i; if(px>=RGB_N)px=0; *r=rgb[px][0];*g=rgb[px][1];*b=rgb[px][2];}
 static uint32_t m_millis(void*c){(void)c;return fake_ms++;} // advances so waits terminate
+// mock network auth: a mutable password store, factory default "duta"
+static char g_pw[33]="duta"; static uint8_t g_pwlen=4, g_default=1;
+static uint8_t m_authchk(void*c,const char*p,uint8_t n){(void)c;return n==g_pwlen && memcmp(p,g_pw,n)==0;}
+static uint8_t m_authset(void*c,const char*p,uint8_t n){(void)c;if(n>32)return 0;memcpy(g_pw,p,n);g_pwlen=n;g_default=0;return 1;}
+static uint8_t m_authdef(void*c){(void)c;return g_default;}
 
 static skrit_hal hal = {0};
 static skrit_dev dev;
@@ -178,6 +183,43 @@ int main(void){
     link_n=0; skrit_dev_rx(&dev,0); for(size_t i=0;i<en3;i++)skrit_dev_rx(&dev,cobs[i]); skrit_dev_rx(&dev,0);
     rn=last_resp(r,0); assert(r[3]==SKRIT_ST_BADCRC); }
   printf("dual BADCRC ok\n");
+
+  // ---- AUTH: a network-gated device ----
+  {
+    skrit_hal ahal = hal; // copy the base mock + add auth
+    ahal.auth_required = 1;
+    ahal.auth_check = m_authchk;
+    ahal.auth_set = m_authset;
+    ahal.auth_is_default = m_authdef;
+    skrit_dev adev;
+    skrit_dev_init(&adev, &ahal, NULL, 1);
+
+    // INFO advertises auth-required + default-credential (flags = body[9] = r[12])
+    link_n = 0; feed_cmd(&adev, SKRIT_INFO, 1, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK && r[12] == (SKRIT_FLAG_AUTH_REQUIRED | SKRIT_FLAG_DEFAULT_CRED));
+    // gated: a normal CMD is rejected until AUTH
+    link_n = 0; feed_cmd(&adev, SKRIT_OUT_GET, 2, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_UNAUTH);
+    // wrong password
+    uint8_t bad[2] = {'n', 'o'}; link_n = 0; feed_cmd(&adev, SKRIT_AUTH, 3, bad, 2, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_UNAUTH);
+    // correct password "duta"
+    uint8_t pw[4] = {'d', 'u', 't', 'a'}; link_n = 0; feed_cmd(&adev, SKRIT_AUTH, 4, pw, 4, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK);
+    // now a normal CMD works
+    link_n = 0; feed_cmd(&adev, SKRIT_OUT_GET, 5, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK);
+    // change the password
+    uint8_t np[3] = {'s', '3', 'c'}; link_n = 0; feed_cmd(&adev, SKRIT_AUTH_SET, 6, np, 3, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK && g_pwlen == 3 && g_default == 0);
+    // reset auth (new connection) -> gated again; INFO no longer flags default-cred
+    skrit_dev_reset_auth(&adev);
+    link_n = 0; feed_cmd(&adev, SKRIT_OUT_GET, 7, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_UNAUTH);
+    link_n = 0; feed_cmd(&adev, SKRIT_INFO, 8, NULL, 0, 1); last_resp(r, 1);
+    assert((r[12] & SKRIT_FLAG_DEFAULT_CRED) == 0);
+  }
+  printf("AUTH gate/login/set/reset ok\n");
 
   printf("ALL CORE TESTS PASSED\n");
   return 0;

@@ -112,6 +112,13 @@ typedef struct skrit_hal {
   // pump: keep USB/transport + watchdog alive during a blocking wait (may be NULL).
   uint32_t (*millis)(void *ctx);
   void (*pump)(void *ctx);
+
+  // ---- network auth (NULL/0 on USB/BLE — those aren't gated). These trail the
+  // struct so existing positional HAL initializers zero-fill them. ----
+  uint8_t auth_required; // 1 = require AUTH before other CMDs / DATA bridging
+  uint8_t (*auth_check)(void *ctx, const char *pw, uint8_t n);    // 1 if pw matches
+  uint8_t (*auth_set)(void *ctx, const char *pw, uint8_t n);      // store new pw; 1 = ok
+  uint8_t (*auth_is_default)(void *ctx);                          // 1 if still factory default
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -119,6 +126,7 @@ typedef struct skrit_dev {
   const skrit_hal *hal;
   void *ctx;
   uint8_t muxed; // 1 = single endpoint carries both channels (skrit-mux)
+  uint8_t authed; // session authenticated (only matters when hal->auth_required)
 
   // CMD/mux receive state machine
   uint8_t rx[SKRIT_RX_CAP];
@@ -146,6 +154,10 @@ static void skrit_dev_poll(skrit_dev *d);              // tee target console -> 
 // Optional: platforms call this to push an async event (NUS button, input edge).
 // `static inline` so it never warns when a platform doesn't use it.
 static inline void skrit_dev_emit_event(skrit_dev *d, uint8_t type, const uint8_t *body, uint8_t n);
+// Network transports call this on each new connection to drop back to unauthed.
+static inline void skrit_dev_reset_auth(skrit_dev *d) { d->authed = 0; }
+// True while a network device is waiting for AUTH (gate other CMDs + DATA).
+static inline uint8_t skrit__gated(skrit_dev *d) { return d->hal->auth_required && !d->authed; }
 
 // ===========================================================================
 // framing
@@ -232,6 +244,7 @@ static void skrit_dev_poll(skrit_dev *d) {
   if (!d->hal->data_read) return;
   uint16_t got = d->hal->data_read(d->ctx, buf, sizeof buf);
   if (!got) return;
+  if (skrit__gated(d)) return; // drained, but don't leak the console while unauthed
   skrit__console_out(d, buf, got);
   if (d->exp_pat && !d->exp_hit) {
     for (uint16_t i = 0; i < got; i++) {
@@ -362,6 +375,12 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
   uint8_t body[SKRIT_MAX_BODY];
   uint8_t bl = 0;
 
+  // Auth gate: an unauthenticated network session may only PING/INFO/AUTH.
+  if (skrit__gated(d) && type != SKRIT_PING && type != SKRIT_INFO && type != SKRIT_AUTH) {
+    skrit__status(d, type, seq, SKRIT_ST_UNAUTH);
+    return;
+  }
+
   switch (type) {
   case SKRIT_PING:
     body[bl++] = SKRIT_ST_OK;
@@ -378,7 +397,23 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     body[bl++] = (uint8_t)SKRIT_PROTO_VER;
     body[bl++] = h->n_inputs;
     body[bl++] = h->macro_tier;
+    body[bl++] = (h->auth_required ? SKRIT_FLAG_AUTH_REQUIRED : 0) |
+                 ((h->auth_is_default && h->auth_is_default(d->ctx)) ? SKRIT_FLAG_DEFAULT_CRED : 0);
     skrit__respond(d, SKRIT_INFO | SKRIT_RESP, seq, body, bl);
+    break;
+  case SKRIT_AUTH:
+    if (h->auth_check && h->auth_check(d->ctx, (const char *)b, len)) {
+      d->authed = 1;
+      skrit__status(d, type, seq, SKRIT_ST_OK);
+    } else {
+      skrit__status(d, type, seq, SKRIT_ST_UNAUTH);
+    }
+    break;
+  case SKRIT_AUTH_SET: // only reached when authed (or on a non-gated device)
+    if (!h->auth_set) skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED);
+    else if (len == 0 || len > SKRIT_PASSWORD_MAX) skrit__status(d, type, seq, SKRIT_ST_BADARGS);
+    else if (h->auth_set(d->ctx, (const char *)b, len)) skrit__status(d, type, seq, SKRIT_ST_OK);
+    else skrit__status(d, type, seq, SKRIT_ST_STORAGE);
     break;
   case SKRIT_DEVICE_NAME: {
     body[bl++] = SKRIT_ST_OK;
@@ -656,7 +691,9 @@ static void skrit__frame_complete(skrit_dev *d) {
   if (d->muxed) {
     uint8_t ch = dec[0];
     if (ch == SKRIT_MUX_DATA) {
-      if (d->hal->data_write && dn > 1) d->hal->data_write(d->ctx, dec + 1, (uint16_t)(dn - 1));
+      // Drop host->target console writes while a network session is unauthed.
+      if (!skrit__gated(d) && d->hal->data_write && dn > 1)
+        d->hal->data_write(d->ctx, dec + 1, (uint16_t)(dn - 1));
     } else if (ch == SKRIT_MUX_CMD) {
       skrit__on_frame(d, dec + 1, (uint16_t)(dn - 1));
     }

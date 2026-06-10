@@ -24,6 +24,8 @@ enum {
   SKRIT_INFO = 0x02,
   SKRIT_DEVICE_NAME = 0x03, // self-describe: device name string
   SKRIT_REBOOT = 0x04,      // mode(1): 0=app reset, 1=bootloader/DFU. OK then reboots.
+  SKRIT_AUTH = 0x05,        // password(...): authenticate the session (network transports)
+  SKRIT_AUTH_SET = 0x06,    // new_password(...): change the password (must be authed)
   SKRIT_OUT_SET = 0x10,
   SKRIT_OUT_GET = 0x11,
   SKRIT_OUT_TOGGLE = 0x12,
@@ -80,7 +82,20 @@ enum {
   SKRIT_ST_NOTFOUND = 0x05,
   SKRIT_ST_BUSY = 0x06,
   SKRIT_ST_UNSUPPORTED = 0x07, // skrit-mc tier/opcode above macro_tier
+  SKRIT_ST_UNAUTH = 0x08,      // session not authenticated (send AUTH first)
 };
+
+// ---- INFO flags byte (trailing, after macro_tier) ----
+// Additive: an older host that stops at macro_tier reads 0 (no auth). Network
+// transports (WebSocket) set AUTH_REQUIRED; until AUTH succeeds the device
+// answers only PING/INFO/AUTH and does not bridge the DATA console.
+enum {
+  SKRIT_FLAG_AUTH_REQUIRED = 0x01, // AUTH needed before other commands / DATA
+  SKRIT_FLAG_DEFAULT_CRED = 0x02,  // still the factory password — prompt a change
+};
+// Factory default password (network devices ship with this; change on first use).
+#define SKRIT_DEFAULT_PASSWORD "duta"
+#define SKRIT_PASSWORD_MAX 32
 
 // ---- capability bits (INFO body[3]) ----
 enum {
