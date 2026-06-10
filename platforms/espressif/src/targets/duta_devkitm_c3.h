@@ -1,4 +1,4 @@
-// targets/duta_devkitm_c3.h — OUR Duta build on the Espressif ESP32-C3-DevKitM-1.
+// targets/duta_devkitm_c3.h: OUR Duta build on the Espressif ESP32-C3-DevKitM-1.
 #ifndef DUTA_TARGET_DEVKITM_C3_H
 #define DUTA_TARGET_DEVKITM_C3_H
 

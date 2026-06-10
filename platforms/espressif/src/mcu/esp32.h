@@ -1,7 +1,7 @@
-// mcu/esp32.h — classic ESP32 silicon truth. See duta_pincap.h / mcu/esp32s3.h.
+// mcu/esp32.h: classic ESP32 silicon truth. See duta_pincap.h / mcu/esp32s3.h.
 // No native USB (the mux link rides UART0). Hazards: GPIO0/2/5/12/15 strapping
 // (caution); GPIO6-11 SPI flash (forbidden); GPIO34-39 are INPUT-ONLY (no output,
-// no PWM — encoded as ADC-only so they're never offered as outputs). DAC on
+// no PWM, encoded as ADC-only so they're never offered as outputs). DAC on
 // GPIO25/26. I²C is matrix-routable (bus = DUTA_NO_BUS).
 #ifndef DUTA_MCU_ESP32_H
 #define DUTA_MCU_ESP32_H

@@ -1,6 +1,6 @@
-// targets/duta_devkitc_s3.h — OUR Duta build on the Espressif ESP32-S3-DevKitC-1.
+// targets/duta_devkitc_s3.h: OUR Duta build on the Espressif ESP32-S3-DevKitC-1.
 // Based on the vendored board (facts) + the Duta role assignments (choices).
-// These pins are what WE wire, not board givens — change them to match your build,
+// These pins are what WE wire, not board givens. Change them to match your build,
 // or provision at runtime (the compiled table is just the default).
 #ifndef DUTA_TARGET_DEVKITC_S3_H
 #define DUTA_TARGET_DEVKITC_S3_H

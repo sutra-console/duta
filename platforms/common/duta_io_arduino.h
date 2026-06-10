@@ -1,9 +1,9 @@
-// duta_io_arduino.h — generic, table-driven Arduino IO driver (header-only).
+// duta_io_arduino.h: generic, table-driven Arduino IO driver (header-only).
 // ============================================================================
 // IS the skrit_hal IO callbacks (outputs, PWM, RGB, inputs) for the board's
 // `duta_outputs[]` / `duta_inputs[]` tables (see duta_io.h). A platform's
 // main.cpp includes board.h then this, and points the HAL's IO fields at the
-// duta_io_* functions — no hand-wired per-pin logic. Adding a relay is one row.
+// duta_io_* functions, no hand-wired per-pin logic. Adding a relay is one row.
 //
 // The driver operates on an *active table* pointer (`duta_tbl`/`duta_tbl_n`) that
 // defaults to the board's compiled `duta_outputs[]`. Defining DUTA_PROVISION
@@ -132,7 +132,7 @@ static inline void duta_io_out_set(void *ctx, uint8_t idx, uint8_t on) {
     FastLED.show();
 #endif
     break;
-  default: // plain digital on/off (relay, LED, reset line — see the name)
+  default: // plain digital on/off (relay, LED, reset line; see the name)
     duta_on[idx] = on ? 1 : 0;
     duta__write_digital(io, on);
     break;
@@ -249,7 +249,7 @@ static inline uint16_t duta_io_in_get(void *ctx, uint8_t idx) {
 #endif
 
 // ===========================================================================
-// Runtime provisioning (DUTA_PROVISION) — the mcu ∩ board resolver, the current
+// Runtime provisioning (DUTA_PROVISION): the mcu ∩ board resolver, the current
 // table reader, and the validated table writer + persistence. The board header
 // supplies the mcu pin table (duta_mcu_pins / DUTA_MCU_NPINS) and the overlay
 // (DUTA_BROKEN_OUT_ALL or duta_board_broken_out[]; duta_board_uses[]/DUTA_USES_N).
@@ -260,7 +260,7 @@ static inline uint16_t duta_io_in_get(void *ctx, uint8_t idx) {
 #endif
 // A board with no committed pins just doesn't declare duta_board_uses[]; give a
 // harmless placeholder so the resolver loop always compiles. (DUTA_USES_N is a
-// sizeof expression on real boards — runtime-checked, not #if-able.)
+// sizeof expression on real boards, runtime-checked, not #if-able.)
 #ifndef DUTA_USES_N
 static const duta_pin_use duta_board_uses[] = {{-1, DUTA_USE_NONE, ""}};
 #define DUTA_USES_N 0
@@ -270,7 +270,7 @@ static duta_io duta_io_ram[DUTA_MAX_OUTPUTS]; // the provisioned table (loaded a
 static char duta_io_namepool[DUTA_NAME_POOL]; // RAM backing for provisioned names
 
 // Persistence hooks. A platform defines DUTA_HAVE_STORE + these three to persist
-// across reboots (ESP32 NVS, RP2040 LittleFS). The default is a RAM buffer —
+// across reboots (ESP32 NVS, RP2040 LittleFS). The default is a RAM buffer;
 // provisioning works for the session but reverts on power-cycle.
 #ifndef DUTA_HAVE_STORE
 static uint8_t duta__store[DUTA_MAX_OUTPUTS * 40 + 8];
@@ -355,7 +355,7 @@ static uint8_t duta_io_config_get(void *ctx, uint8_t index, uint8_t *type, int16
 // Validate one provisioning row: the pin must be offerable, and the role must fit
 // the pin's caps. RGB is only allowed on the compiled RGB pin (FastLED is fixed).
 // A FIXED pin (e.g. the Pico's onboard GP25 LED) may be KEPT in its compiled-
-// default role — "if the LED can't move, it's always the LED" — just never
+// default role ("if the LED can't move, it's always the LED"), just never
 // repurposed; pins absent from the mcu map are likewise compiled-default-only.
 static uint8_t duta__keeps_default_role(uint8_t type, int16_t pin) {
   for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++)

@@ -2,15 +2,15 @@
 // ============================================================================
 // A real Duta adapter built on the shared core (../../common/skrit_device.h):
 //
-//   * DATA console  — a hardware UART (Serial1 = UART0 on DATA_TX/DATA_RX)
+//   * DATA console  : a hardware UART (Serial1 = UART0 on DATA_TX/DATA_RX)
 //                     bridged to the target, full duplex.
-//   * CMD + DATA    — multiplexed over the single native USB-CDC via skrit-mux.
-//   * Controls      — declared as a table in board.h, driven by the shared
+//   * CMD + DATA    : multiplexed over the single native USB-CDC via skrit-mux.
+//   * Controls      : declared as a table in board.h, driven by the shared
 //                     duta_io driver (2 digital outputs + a PWM LED).
-//   * Macro VM      — skrit-mc tiers 1-2; scratch push-and-run.
-//   * Serial control— SERIAL_GET/SET reconfigures the DATA UART; SERIAL_SIGNAL
+//   * Macro VM      : skrit-mc tiers 1-2; scratch push-and-run.
+//   * Serial control: SERIAL_GET/SET reconfigures the DATA UART; SERIAL_SIGNAL
 //                     drives DTR/RTS (auto-reset into ESP/AVR bootloaders) + BREAK.
-//   * REBOOT        — app reset, or reboot-to-UF2-bootloader (BOOTSEL/DFU).
+//   * REBOOT        : app reset, or reboot-to-UF2-bootloader (BOOTSEL/DFU).
 //
 // IO is table-driven (board.h `duta_outputs[]` + duta_io_arduino.h); this file
 // is just the transport, serial, and reboot HAL plus the two-line main loop.
@@ -25,7 +25,7 @@ extern "C" {
 #define FW_LO 0x04
 #define FW_HI 0x00
 
-// Serial1 is UART0 — the bridged target console. `Serial` is the native USB-CDC,
+// Serial1 is UART0, the bridged target console. `Serial` is the native USB-CDC,
 // which carries the mux link (CMD + DATA) to the host.
 static SerialUART &TARGET = Serial1;
 
@@ -96,7 +96,7 @@ static void hal_serial_signal(void *, uint8_t mask, uint8_t value) {
 static void hal_reboot(void *, uint8_t mode) {
   Serial.flush();
   if (mode == SKRIT_REBOOT_BOOTLOADER) {
-    // Drop into the RP2040/RP2350 ROM UF2 bootloader — the native USB
+    // Drop into the RP2040/RP2350 ROM UF2 bootloader; the native USB
     // re-enumerates as the RPI-RP2 mass-storage device (no BOOTSEL dance).
     rp2040.rebootToBootloader();
   } else {
@@ -143,7 +143,7 @@ void setup() {
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
 
-  Serial.begin(115200); // native USB-CDC — the mux link
+  Serial.begin(115200); // native USB-CDC: the mux link
   beginTarget();
 
   HAL.caps = board_caps();

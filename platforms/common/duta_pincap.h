@@ -1,12 +1,12 @@
-// duta_pincap.h — the pin-capability vocabulary (the "menu" for provisioning).
+// duta_pincap.h: the pin-capability vocabulary (the "menu" for provisioning).
 // ============================================================================
 // Runtime provisioning is "pick a role for a pin from what that pin can be."
 // The menu is LAYERED, and each layer only ever *narrows* freedom:
 //
-//   mcu layer  (mcu/<chip>.h)  — silicon truth: the full pin inventory, each
+//   mcu layer  (mcu/<chip>.h):  silicon truth, the full pin inventory, each
 //                pin's intrinsic capabilities, and an immutable hazard status.
 //                Written once per chip, reused by every board on it.
-//   board layer (boards/<v>_<b>.h) — the small overlay of physical reality: which
+//   board layer (boards/<v>_<b>.h): the small overlay of physical reality, which
 //                mcu pins are broken out to a header, and which are committed to
 //                something onboard (fixed = hidden, dual = offered-with-warning).
 //
@@ -14,7 +14,7 @@
 // resolves mcu ∩ board into a per-pin status and reports it over PIN_CAPS, so the
 // app's picker renders the menu with ZERO hardcoded chip knowledge.
 //
-// This header is the shared type/vocabulary only — the mcu tables that USE it
+// This header is the shared type/vocabulary only; the mcu tables that USE it
 // live in each platform's mcu/<chip>.h. Header-only, no deps.
 // ============================================================================
 #ifndef DUTA_PINCAP_H
@@ -37,8 +37,8 @@ enum {
 // ---- mcu-layer hazard status (silicon truth, immutable) ---------------------
 enum {
   DUTA_PIN_FREE = 0,      // safe to provision to anything in .caps
-  DUTA_PIN_CAUTION = 1,   // works, but risky — strapping/boot pin; offer + warn
-  DUTA_PIN_FORBIDDEN = 2, // never offer — flash/PSRAM/USB/internal
+  DUTA_PIN_CAUTION = 1,   // works, but risky: strapping/boot pin; offer + warn
+  DUTA_PIN_FORBIDDEN = 2, // never offer: flash/PSRAM/USB/internal
 };
 
 // ---- board-layer commitment (overlay; resolved against broken-out) ----------

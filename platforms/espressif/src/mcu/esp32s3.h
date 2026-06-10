@@ -1,4 +1,4 @@
-// mcu/esp32s3.h — ESP32-S3 silicon truth (pin inventory + caps + hazards).
+// mcu/esp32s3.h: ESP32-S3 silicon truth (pin inventory + caps + hazards).
 // Reused by every ESP32-S3 board; boards/<vendor>_<board>.h includes this and
 // adds only the physical overlay (broken-out + committed pins). See duta_pincap.h.
 //
@@ -44,7 +44,7 @@ static const duta_pin duta_mcu_pins[] = {
     {19, S3_FREE, DUTA_PIN_FORBIDDEN, DUTA_NO_BUS}, // USB D-
     {20, S3_FREE, DUTA_PIN_FORBIDDEN, DUTA_NO_BUS}, // USB D+
     {21, S3_DIG, DUTA_PIN_FREE, DUTA_NO_BUS},
-    // 26-32: SPI flash bus — never repurpose.
+    // 26-32: SPI flash bus, never repurpose.
     {26, S3_DIG, DUTA_PIN_FORBIDDEN, DUTA_NO_BUS},
     {27, S3_DIG, DUTA_PIN_FORBIDDEN, DUTA_NO_BUS},
     {28, S3_DIG, DUTA_PIN_FORBIDDEN, DUTA_NO_BUS},

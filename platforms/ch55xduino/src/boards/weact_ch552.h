@@ -5,13 +5,13 @@
 #define BOARD_NAME "WeAct CH552"
 #define BOARD_VENDOR "WeAct Studio"
 
-// Relays — typical active-LOW relay modules (drive LOW = ON).
+// Relays: typical active-LOW relay modules (drive LOW = ON).
 #define RELAY1_PIN       34 // P3.4
 #define RELAY2_PIN       33 // P3.3
 #define RELAY_ACTIVE_LOW 1
 
 // Commandable aux LED (external). NOTE: the on-board blue D1 is wired to P3.0,
-// which is the UART RXD — so D1 is a free RX-activity light, not controllable
+// which is the UART RXD, so D1 is a free RX-activity light, not controllable
 // while the DATA bridge is running. P1.4 is a free pin for an external LED.
 #define LED_PIN        14   // P1.4
 #define LED_ACTIVE_LOW 0    // active-HIGH

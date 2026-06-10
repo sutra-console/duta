@@ -1,4 +1,4 @@
-// targets/duta_pico2.h — OUR Duta build on the Raspberry Pi Pico 2.
+// targets/duta_pico2.h: OUR Duta build on the Raspberry Pi Pico 2.
 #ifndef DUTA_TARGET_PICO2_H
 #define DUTA_TARGET_PICO2_H
 

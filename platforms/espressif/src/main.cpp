@@ -2,15 +2,15 @@
 // ============================================================================
 // A real Duta adapter built on the shared core (../../common/skrit_device.h):
 //
-//   * DATA console  — a hardware UART (Serial1 on DATA_TX/DATA_RX) bridged to
+//   * DATA console  : a hardware UART (Serial1 on DATA_TX/DATA_RX) bridged to
 //                     the target, full duplex.
-//   * CMD + DATA    — multiplexed over the single native USB-CDC via skrit-mux.
-//   * Controls      — declared as a table in board.h, driven by the shared
+//   * CMD + DATA    : multiplexed over the single native USB-CDC via skrit-mux.
+//   * Controls      : declared as a table in board.h, driven by the shared
 //                     duta_io driver (relays, PWM LED, addressable RGB).
-//   * Macro VM      — skrit-mc tiers 1-2; scratch push-and-run.
-//   * Serial control— SERIAL_GET/SET reconfigures the DATA UART; SERIAL_SIGNAL
+//   * Macro VM      : skrit-mc tiers 1-2; scratch push-and-run.
+//   * Serial control: SERIAL_GET/SET reconfigures the DATA UART; SERIAL_SIGNAL
 //                     drives DTR/RTS (auto-reset into ESP/AVR bootloaders) + BREAK.
-//   * REBOOT        — app reset, or reboot-to-download on S3/C3.
+//   * REBOOT        : app reset, or reboot-to-download on S3/C3.
 //
 // IO is table-driven (board.h `duta_outputs[]` + duta_io_arduino.h); this file
 // is just the transport, serial, and reboot HAL plus the two-line main loop.
@@ -50,7 +50,7 @@ extern "C" {
 }
 
 #if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
-#include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG — force download (DFU) boot
+#include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG: force download (DFU) boot
 #endif
 
 #define FW_LO 0x04
@@ -126,7 +126,7 @@ static void hal_reboot(void *, uint8_t mode) {
   Serial.flush();
 #if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
   if (mode == SKRIT_REBOOT_BOOTLOADER) {
-    // Latch the ROM download/DFU path, then reset — the native USB re-enumerates
+    // Latch the ROM download/DFU path, then reset; the native USB re-enumerates
     // as the serial/JTAG downloader (no BOOT-button dance needed).
     REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
   }
@@ -174,7 +174,7 @@ void setup() {
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
 
-  Serial.begin(115200); // USB-CDC (S3/C3) or UART0-USB (classic) — the mux link
+  Serial.begin(115200); // USB-CDC (S3/C3) or UART0-USB (classic): the mux link
   beginTarget();
 
   HAL.n_outputs = duta_tbl_n; // a provisioned table may differ from the compiled default

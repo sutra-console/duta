@@ -18,7 +18,7 @@
 // if no panel is wired.
 #define ENABLE_OLED 1
 
-// Parity on the DATA UART (CH552 9-bit mode). Rarely needed — modern serial is
+// Parity on the DATA UART (CH552 9-bit mode). Rarely needed; modern serial is
 // 8N1. A board may opt in by `#define PARITY_SUPPORT 1` in its header; default
 // is lean 8N1. Advertised to the app via the INFO 'parity' capability bit.
 #ifndef PARITY_SUPPORT

@@ -1,4 +1,4 @@
-// ws.h — minimal RFC6455 WebSocket server codec (no deps).
+// ws.h: minimal RFC6455 WebSocket server codec (no deps).
 // ============================================================================
 // Just enough to carry the skrit-mux byte stream over WebSocket binary frames:
 // the opening-handshake accept key (SHA-1 + base64) and frame decode/encode

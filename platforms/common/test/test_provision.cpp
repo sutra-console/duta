@@ -12,7 +12,7 @@ int pin_level[64], pin_pwm[64], pin_mode_[64], awres, awfreq;
 
 // ---- mock board: compiled default (3 outputs) + mcu map + board overlay -----
 // Pin 9 is a Pico-style FIXED onboard LED: in the compiled default but never
-// offerable — a provisioned table may KEEP it as PWM, never repurpose it.
+// offerable; a provisioned table may KEEP it as PWM, never repurpose it.
 static const duta_io duta_outputs[] = {
     {SKRIT_CTRL_IO, 4, "Relay 1", 0, 0},
     {SKRIT_CTRL_PWM, 5, "Aux LED", 0, 0},

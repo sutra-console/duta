@@ -1,4 +1,4 @@
-// skrit wire protocol — portable C reference (no deps). See PROTOCOL.md.
+// skrit wire protocol: portable C reference (no deps). See PROTOCOL.md.
 //
 // On the wire each frame is:   0x00  COBS( TYPE SEQ LEN BODY...  CRC8 )  0x00
 //   TYPE  request id; the response echoes TYPE | SKRIT_RESP
@@ -7,7 +7,7 @@
 //   CRC8  CRC-8/ATM (poly 0x07, init 0x00) over TYPE SEQ LEN BODY
 //
 // This header is shared by the C/C++ firmware platforms (espressif, zephyr,
-// host, and — eventually — ch55xduino). MicroPython mirrors it in protocol.py.
+// host, and eventually ch55xduino). MicroPython mirrors it in protocol.py.
 #ifndef SKRIT_PROTOCOL_H
 #define SKRIT_PROTOCOL_H
 
@@ -102,7 +102,7 @@ enum {
 // answers only PING/INFO/AUTH and does not bridge the DATA console.
 enum {
   SKRIT_FLAG_AUTH_REQUIRED = 0x01, // AUTH needed before other commands / DATA
-  SKRIT_FLAG_DEFAULT_CRED = 0x02,  // still the factory password — prompt a change
+  SKRIT_FLAG_DEFAULT_CRED = 0x02,  // still the factory password; prompt a change
   SKRIT_FLAG_PROVISION = 0x04,     // accepts runtime IO provisioning (PIN_CAPS/CONFIG_*)
 };
 // Factory default password (network devices ship with this; change on first use).
@@ -122,7 +122,7 @@ enum {
 };
 
 // ===========================================================================
-// skrit-mux — one byte stream carrying BOTH the DATA console and the CMD
+// skrit-mux: one byte stream carrying BOTH the DATA console and the CMD
 // protocol, for transports with a single channel (single USB-CDC, WebSocket).
 // Dual-CDC devices (e.g. CH552) do NOT mux: DATA is its own raw port. A muxed
 // device sets SKRIT_CAP_MUX in INFO.
@@ -134,7 +134,7 @@ enum {
 //
 // COBS already removes 0x00 from the body, so the delimiters stay unambiguous
 // and the link resyncs after a glitch. The CMD payload is byte-identical to the
-// dual-CDC CMD frame — only a 1-byte channel tag is prepended before COBS.
+// dual-CDC CMD frame; only a 1-byte channel tag is prepended before COBS.
 // ===========================================================================
 enum { SKRIT_MUX_DATA = 0x00, SKRIT_MUX_CMD = 0x01 };
 
@@ -156,7 +156,7 @@ enum {                        // opcodes (low nibble groups by tier)
   SKRIT_MC_ELSE = 0x21,       // skip(2)            reserved v2
   SKRIT_MC_ENDIF = 0x22,      // reserved v2
 };
-// WAITIO comparison ops (cmp byte) — matches the host Cmp order.
+// WAITIO comparison ops (cmp byte): matches the host Cmp order.
 enum {
   SKRIT_MC_GT = 0, SKRIT_MC_LT = 1, SKRIT_MC_GE = 2,
   SKRIT_MC_LE = 3, SKRIT_MC_EQ = 4, SKRIT_MC_NE = 5,
@@ -168,7 +168,7 @@ enum { SKRIT_TIER_NONE = 0, SKRIT_TIER_REPLAY = 1, SKRIT_TIER_INTERACTIVE = 2, S
 // Typed by BEHAVIOR, not fixture: what a pin IS (relay, LED, fan, reset button)
 // goes in the descriptive name; the type says how it's driven. PWM and RGB
 // outputs also answer OUT_SET/TOGGLE (0 = off, 1 = full/white). RGB is an
-// addressable-LED color via OUT_RGB; no caps bit — the type advertises it.
+// addressable-LED color via OUT_RGB; no caps bit, the type advertises it.
 enum {
   SKRIT_CTRL_IO = 0,  // digital on/off line
   SKRIT_CTRL_PWM = 1, // duty-cycle output (OUT_PWM, 0..1023)
@@ -180,7 +180,7 @@ enum {
 // ---- input types (INPUT_DESC body[2]) ----
 enum { SKRIT_IN_DIGITAL = 0, SKRIT_IN_ANALOG = 1 };
 
-// ---- DATA medium (DATA_DESC kind) — what the bridged channel carries. UART is
+// ---- DATA medium (DATA_DESC kind): what the bridged channel carries. UART is
 // the default (a raw byte console); the rest are the roadmap. A device that
 // doesn't answer DATA_DESC is treated as UART, so nothing regresses.
 enum {
@@ -193,7 +193,7 @@ enum {
   SKRIT_DATA_I2C = 6,       // I2C transactions (first non-UART backend target)
 };
 
-// ---- pin capability bits (PIN_CAPS `caps` byte) — what a pin's silicon can do.
+// ---- pin capability bits (PIN_CAPS `caps` byte): what a pin's silicon can do.
 // The firmware mirrors these in duta_pincap.h (the per-mcu tables); the app reads
 // them to constrain the provisioning picker to valid roles for each pin.
 enum {
@@ -206,7 +206,7 @@ enum {
   SKRIT_PINCAP_TOUCH = 0x40,   // capacitive touch
 };
 // PIN_CAPS `warn` byte: 0 = offer clean, 1 = offer but show the reason (the row's
-// name string carries the reason — a strapping/boot caution or a dual-use label).
+// name string carries the reason: a strapping/boot caution or a dual-use label).
 enum { SKRIT_PIN_CLEAN = 0, SKRIT_PIN_WARN = 1 };
 #define SKRIT_NO_BUS 0xFF       // PIN_CAPS `bus`: not a bus pin / matrix-routable
 #define SKRIT_CONFIG_RESET 0xFF // CONFIG_SET `n`: revert to the compiled-default table

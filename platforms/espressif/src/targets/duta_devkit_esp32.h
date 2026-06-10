@@ -1,4 +1,4 @@
-// targets/duta_devkit_esp32.h — OUR Duta build on a classic ESP32 DevKit.
+// targets/duta_devkit_esp32.h: OUR Duta build on a classic ESP32 DevKit.
 #ifndef DUTA_TARGET_DEVKIT_ESP32_H
 #define DUTA_TARGET_DEVKIT_ESP32_H
 

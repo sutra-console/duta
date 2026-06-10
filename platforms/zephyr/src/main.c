@@ -1,12 +1,12 @@
-// Duta on Zephyr — nRF52840 (DK + dongle), and any Zephyr board.
+// Duta on Zephyr: nRF52840 (DK + dongle), and any Zephyr board.
 // ============================================================================
 // Built on the shared core (../../common/skrit_device.h). The skrit-mux byte
 // stream (DATA + CMD over one channel) rides one of two transports, chosen at
 // build time:
 //
-//   * USB CDC ACM (default) — a CDC ACM port; build with the board's normal
+//   * USB CDC ACM (default): a CDC ACM port; build with the board's normal
 //     prj.conf / board overlay.
-//   * BLE (Nordic UART Service) — enable with overlay-ble.conf
+//   * BLE (Nordic UART Service): enable with overlay-ble.conf
 //     (`west build -- -DEXTRA_CONF_FILE=overlay-ble.conf`). CONFIG_BT selects it.
 //
 // A hardware UART (the `duta-data` alias) bridges the target console in both.

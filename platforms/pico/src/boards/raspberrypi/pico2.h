@@ -1,4 +1,4 @@
-// boards/raspberrypi/pico2.h — Raspberry Pi Pico 2 (RP2350; vendored board).
+// boards/raspberrypi/pico2.h: Raspberry Pi Pico 2 (RP2350; vendored board).
 // Same breakout + onboard LED as the Pico (non-W variant).
 #ifndef DUTA_VBOARD_RASPBERRYPI_PICO2_H
 #define DUTA_VBOARD_RASPBERRYPI_PICO2_H

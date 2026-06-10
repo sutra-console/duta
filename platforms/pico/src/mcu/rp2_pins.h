@@ -1,4 +1,4 @@
-// mcu/rp2_pins.h — the GP0..29 pin table shared by RP2040 and RP2350. Included by
+// mcu/rp2_pins.h: the GP0..29 pin table shared by RP2040 and RP2350. Included by
 // mcu/rp2040.h and mcu/rp2350.h after they set DUTA_MCU_NAME / native-USB. The
 // RP2 boot ROM uses dedicated QSPI pins (not in GP0..29), so there are no
 // strapping/flash hazards in the GPIO range. Every GPIO is PWM-capable; GP26-29

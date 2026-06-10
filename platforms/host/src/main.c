@@ -1,4 +1,4 @@
-// Duta host/native reference — carries the skrit-mux stream over a WebSocket.
+// Duta host/native reference: carries the skrit-mux stream over a WebSocket.
 // ============================================================================
 // The hardware-free CI build target and the seed of the network transport (an
 // ESP32 "WiFi bridge" answers the same way). Built on the shared core
@@ -95,7 +95,7 @@ static skrit_hal HAL = {
     .out_get = hal_out_get,
     .out_desc = hal_out_desc,
     .millis = hal_millis,
-    .auth_required = 1, // network transport — gate behind AUTH
+    .auth_required = 1, // network transport: gate behind AUTH
     .auth_check = hal_auth_check,
     .auth_set = hal_auth_set,
     .auth_is_default = hal_auth_is_default,
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   listen(s, 1);
-  printf("Duta host (WebSocket) on ws://127.0.0.1:%d/  — AUTH \"%s\"\n", port, SKRIT_DEFAULT_PASSWORD);
+  printf("Duta host (WebSocket) on ws://127.0.0.1:%d/  (AUTH \"%s\")\n", port, SKRIT_DEFAULT_PASSWORD);
   fflush(stdout);
 
   for (;;) {

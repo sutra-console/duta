@@ -1,6 +1,6 @@
-// boards/espressif/devkitc_s3.h — Espressif ESP32-S3-DevKitC-1 (vendored board).
+// boards/espressif/devkitc_s3.h: Espressif ESP32-S3-DevKitC-1 (vendored board).
 // FACTS ONLY: which mcu it carries, what's broken out, what's wired onboard.
-// No Duta roles here — a target (targets/*.h) includes this and assigns those.
+// No Duta roles here; a target (targets/*.h) includes this and assigns those.
 #ifndef DUTA_VBOARD_ESPRESSIF_DEVKITC_S3_H
 #define DUTA_VBOARD_ESPRESSIF_DEVKITC_S3_H
 

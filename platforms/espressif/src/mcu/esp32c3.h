@@ -1,4 +1,4 @@
-// mcu/esp32c3.h — ESP32-C3 silicon truth. See duta_pincap.h / mcu/esp32s3.h.
+// mcu/esp32c3.h: ESP32-C3 silicon truth. See duta_pincap.h / mcu/esp32s3.h.
 // Hazards: GPIO2/8/9 strapping (caution; 9 = boot); GPIO12-17 SPI flash
 // (forbidden); GPIO18/19 native-USB D-/D+ (forbidden). ADC on GPIO0-5. I²C is
 // matrix-routable (bus = DUTA_NO_BUS).

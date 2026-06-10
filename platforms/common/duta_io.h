@@ -1,4 +1,4 @@
-// duta_io.h — the board IO descriptor type (small; board.h includes this).
+// duta_io.h: the board IO descriptor type (small; board.h includes this).
 // ============================================================================
 // A board declares WHAT it has as tables of these descriptors, e.g.:
 //
@@ -7,7 +7,7 @@
 //     { SKRIT_CTRL_PWM, LED_PIN,    "Aux LED" },
 //     { SKRIT_CTRL_RGB, RGB_PIN,    "RGB LED", 0, RGB_COUNT },
 //   };
-// (type is the *behavior* — IO/PWM/RGB; the fixture goes in the name.)
+// (type is the *behavior*: IO/PWM/RGB; the fixture goes in the name.)
 //
 // The generic Arduino driver that turns these into skrit_hal IO callbacks lives
 // in duta_io_arduino.h (included by main.cpp after board.h). Splitting the type

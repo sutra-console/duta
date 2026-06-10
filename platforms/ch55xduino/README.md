@@ -27,11 +27,11 @@ a line-based ASCII command set (below) also works for quick manual use.
 | **P1.7 / P1.6** | OLED SCL / SDA (when enabled) | SSD1306 |
 | **GND**   | Ground | common (required) |
 
-> CH552 I/O is 3.3V (5V-tolerant inputs). Don't drive a relay coil directly — use
+> CH552 I/O is 3.3V (5V-tolerant inputs). Don't drive a relay coil directly; use
 > a relay **module** with an onboard driver. Pins are set by the selected board
 > (see **Boards** below).
 
-## CMD port — ASCII commands (one line, `\n`, case-insensitive)
+## CMD port: ASCII commands (one line, `\n`, case-insensitive)
 
 | Command | Reply | Action |
 |---------|-------|--------|
@@ -49,7 +49,7 @@ host baud, DTR-gated upstream).
 
 ## Build (arduino-cli)
 
-`arduino-cli` is **pinned to 1.0.4** — ≥1.2 breaks the ch55xduino merged-`.cpp`
+`arduino-cli` is **pinned to 1.0.4**: ≥1.2 breaks the ch55xduino merged-`.cpp`
 step (`sketch_merged.cpp not found`). The `usb_settings=user266` option is
 **mandatory** (the dual-CDC stack is a user-mode USB stack needing the 266 B
 USB-RAM window). Run from the repo root:
@@ -93,7 +93,7 @@ enter the bootloader, **Options → List All Devices**, pick `4348 55E0`, set
 
 The pin map is the only board-specific part; everything else (USB, protocol,
 UART0 bridge) is board-agnostic. Pick a board at the top of
-[`src/config.h`](src/config.h) — default **WeAct CH552**:
+[`src/config.h`](src/config.h), default **WeAct CH552**:
 
 ```c
 //#define BOARD_GENERIC_CH552
@@ -106,7 +106,7 @@ pins (ch55xduino style: `Px.y → x*10+y`, e.g. `P3.4 → 34`), and select
 RELAY2_PIN RELAY_ACTIVE_LOW LED_PIN LED_ACTIVE_LOW OLED_SCL_PIN OLED_SDA_PIN
 OLED_I2C_ADDR` (+ optional `PARITY_SUPPORT`). Avoid **P3.6/P3.7** (USB) and
 **P3.0/P3.1** (UART0). `board.h` `#error`s on a missing pin. The CH55x is
-**compile-time only** — no runtime provisioning (no room); see
+**compile-time only**: no runtime provisioning (no room); see
 [BOARDS.md](../../BOARDS.md) for why this platform stays on arduino-cli.
 
 ## Layout

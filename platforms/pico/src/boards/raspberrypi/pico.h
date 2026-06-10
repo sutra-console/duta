@@ -1,5 +1,5 @@
-// boards/raspberrypi/pico.h — Raspberry Pi Pico (RP2040; vendored board).
-// FACTS ONLY: which mcu, what's broken out, what's wired onboard. No Duta roles —
+// boards/raspberrypi/pico.h: Raspberry Pi Pico (RP2040; vendored board).
+// FACTS ONLY: which mcu, what's broken out, what's wired onboard. No Duta roles;
 // a target (targets/*.h) includes this and assigns those.
 #ifndef DUTA_VBOARD_RASPBERRYPI_PICO_H
 #define DUTA_VBOARD_RASPBERRYPI_PICO_H
@@ -15,7 +15,7 @@ static const int16_t duta_board_broken_out[] = {
 };
 #define DUTA_BROKEN_OUT_N ((uint8_t)(sizeof duta_board_broken_out / sizeof duta_board_broken_out[0]))
 
-// Onboard LED on GP25 — NOT on a header, so it's fixed (never provisionable).
+// Onboard LED on GP25, NOT on a header, so it's fixed (never provisionable).
 #define ONBOARD_LED_PIN 25
 static const duta_pin_use duta_board_uses[] = {
     {ONBOARD_LED_PIN, DUTA_USE_FIXED, "onboard LED"},

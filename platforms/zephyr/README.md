@@ -22,12 +22,12 @@ west build -b nrf52840dk/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=overlay-
 DATA + CMD are **multiplexed over one channel** ([skrit-mux](../../protocol/PROTOCOL.md)),
 selected at build time:
 
-- **USB CDC ACM** (default) — a `cdc_acm_uart0` node under `zephyr_udc0`.
-- **BLE — dual-channel** (`overlay-ble.conf`, sets `CONFIG_BT`) — two **skrit GATT
-  services**: DATA carries the raw console (its UUID is NUS-compatible, so plain
+- **USB CDC ACM** (default): a `cdc_acm_uart0` node under `zephyr_udc0`.
+- **BLE, dual-channel** (`overlay-ble.conf`, sets `CONFIG_BT`): two **skrit GATT
+  services**. DATA carries the raw console (its UUID is NUS-compatible, so plain
   BLE-UART terminals read it) and the sibling CMD service (`6E41…`) carries the framed
   CMD protocol. Not muxed. The device advertises the CMD UUID + a `Duta`-prefixed name.
-  **Scaffold** — build-checked in CI, not yet hardware-validated.
+  **Scaffold**: build-checked in CI, not yet hardware-validated.
 
 The target console is a **hardware UART** (`duta-data` devicetree alias → `uart1`) in
 both. Bring your own board by dropping a `boards/<board>.overlay` (a `cdc_acm_uart0` node
@@ -35,7 +35,7 @@ under `zephyr_udc0` + a `duta-data` alias) and a `boards/<board>.conf` (USB stac
 
 | Board | DATA UART (TX/RX) | Outputs | Reboot-to-DFU |
 |-------|-------------------|---------|---------------|
-| `nrf52840dk/nrf52840` | P1.01 / P1.02 | LEDs led0–led2 | GPREGRET `0x57` |
+| `nrf52840dk/nrf52840` | P1.01 / P1.02 | LEDs led0-led2 | GPREGRET `0x57` |
 | `nrf52840dongle/nrf52840` | P1.10 / P1.13 *(adjust)* | green + RGB LEDs | UF2/Open bootloader |
 
 Optional `duta-dtr` / `duta-rts` GPIO aliases drive a target's reset/boot pins from
@@ -49,12 +49,12 @@ GPREGRET→DFU on nRF52) · scratch (`0xFF`) macro push-and-run via the shared s
 
 ## Roadmap
 
-- **BLE transport** — *scaffolded* (`overlay-ble.conf`); the Sutra app has a BLE
+- BLE transport: *scaffolded* (`overlay-ble.conf`); the Sutra app has a BLE
   central (Scan ▸ connect). Needs on-hardware validation: notify flow-control, MTU
   negotiation, pairing/bonding policy.
-- **Dual CDC ACM** — a second `cdc_acm_uart` instance for a raw, un-muxed DATA port that
+- Dual CDC ACM: a second `cdc_acm_uart` instance for a raw, un-muxed DATA port that
   plain terminals can open directly.
-- **Persistent macros** — back the `0x00..0xFE` ids with the settings/NVS subsystem.
-- **Async input events** — push `EVENT_INPUT` on GPIO edges via `skrit_dev_emit_event`.
-- **PWM** — wire the `pwm_set/pwm_get` HAL hooks to `pwm-leds` devicetree nodes
+- Persistent macros: back the `0x00..0xFE` ids with the settings/NVS subsystem.
+- Async input events: push `EVENT_INPUT` on GPIO edges via `skrit_dev_emit_event`.
+- PWM: wire the `pwm_set/pwm_get` HAL hooks to `pwm-leds` devicetree nodes
   (the ESP32/Pico ports answer `OUTPUT_PWM` already; here it reports unsupported).

@@ -1,6 +1,6 @@
-// boards/waveshare/esp32_s3_zero.h — Waveshare ESP32-S3-Zero (vendored board).
+// boards/waveshare/esp32_s3_zero.h: Waveshare ESP32-S3-Zero (vendored board).
 // FACTS ONLY: ESP32-S3FH4R2 (4MB flash, 2MB quad PSRAM), 23.5×18mm castellated
-// module, native USB-C (no USB-UART bridge). No Duta roles here — a target
+// module, native USB-C (no USB-UART bridge). No Duta roles here; a target
 // (targets/*.h) includes this and assigns those.
 #ifndef DUTA_VBOARD_WAVESHARE_ESP32_S3_ZERO_H
 #define DUTA_VBOARD_WAVESHARE_ESP32_S3_ZERO_H

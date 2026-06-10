@@ -4,11 +4,11 @@ Duta on the RP2040 / RP2350 via **Arduino + PlatformIO** (the
 [earlephilhower arduino-pico core](https://github.com/earlephilhower/arduino-pico)),
 built on the shared core ([`../common/skrit_device.h`](../common/skrit_device.h)) with
 table-driven IO (the [`duta_io`](../common/duta_io_arduino.h) driver). A full adapter:
-DATA console bridge, the skrit-mc macro VM (tiers 1–2), serial control, and
+DATA console bridge, the skrit-mc macro VM (tiers 1-2), serial control, and
 reboot-to-bootloader.
 
 Board support follows [BOARDS.md](../../BOARDS.md): [`src/mcu/`](src/mcu) (silicon
-truth), [`src/boards/raspberrypi/`](src/boards) (vendored board facts — e.g. GP25 is
+truth), [`src/boards/raspberrypi/`](src/boards) (vendored board facts, e.g. GP25 is
 the onboard LED and is *not* on a header), [`src/targets/`](src/targets) (our wiring);
 [`src/board.h`](src/board.h) dispatches `-DBOARD_*` to a target.
 
@@ -21,7 +21,7 @@ pio run -e pico2                 # Pico 2 / RP2350
 pio run -e pico -t upload        # flash
 ```
 
-**First flash:** hold **BOOTSEL** while plugging in USB — the board mounts as a UF2
+**First flash:** hold **BOOTSEL** while plugging in USB. The board mounts as a UF2
 drive and `-t upload` (or dragging `.pio/build/<env>/firmware.uf2` onto it) flashes it.
 After that the button is optional: `-t upload` resets a running Duta into BOOTSEL
 automatically (1200-baud touch), and the app's *Reboot → bootloader* (skrit `REBOOT`
@@ -47,7 +47,7 @@ optional `DTR/RTS` auto-reset lines (`-1` = unused).
 ## What it answers
 
 `PING` · `INFO` (caps = mux + serial + reboot + pwm, `macro_tier = 2`) · `DEVICE_NAME` ·
-`DATA_DESC` (uart) · `OUTPUT_SET/GET/TOGGLE/DESC/PULSE/PWM` (Aux LED dims 0–1023) ·
+`DATA_DESC` (uart) · `OUTPUT_SET/GET/TOGGLE/DESC/PULSE/PWM` (Aux LED dims 0-1023) ·
 `PWM_CONFIG` (frequency + resolution get/set) · `SERIAL_GET/SET/SIGNAL` (set DATA
 baud/parity, drive DTR/RTS/BREAK to enter ESP/AVR bootloaders) · `REBOOT` (app, or the
 RP2040/RP2350 UF2/BOOTSEL bootloader) · `MACRO_WRITE_*`/`MACRO_RUN` for scratch (`0xFF`)
@@ -55,12 +55,12 @@ push-and-run.
 
 ## Roadmap
 
-- **Runtime provisioning** — the mcu/board maps are in place; wire `DUTA_PROVISION` +
+- Runtime provisioning: the mcu/board maps are in place; wire `DUTA_PROVISION` +
   LittleFS persistence in `main.cpp` (mirrors the ESP32 port's NVS hooks) to accept IO
   re-provisioning from the app.
-- **Persistent macros** — back the `0x00..0xFE` macro ids with LittleFS on the on-board
+- Persistent macros: back the `0x00..0xFE` macro ids with LittleFS on the on-board
   flash (the core already has the VM; just needs a storage hook).
-- **Dual-CDC mode** — expose a second TinyUSB CDC interface so DATA gets its own raw
+- Dual-CDC mode: expose a second TinyUSB CDC interface so DATA gets its own raw
   port (no mux), mirroring the CH552 dual-CDC transport.
-- **PIO-based extra UARTs** — use the RP2040/RP2350 PIO blocks to bridge additional
+- PIO-based extra UARTs: use the RP2040/RP2350 PIO blocks to bridge additional
   target consoles beyond the single hardware UART0.

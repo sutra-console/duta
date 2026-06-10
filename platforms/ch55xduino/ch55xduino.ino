@@ -157,7 +157,7 @@ __xdata uint8_t pbuf[BIN_BUF_SIZE];   // decoded request / built response (raw)
 __xdata uint8_t respBody[40];         // room for self-describe name strings
 __data uint8_t binLen = 0;
 
-// board-declared inputs (digital/analog) — used by INPUT_DESC/GET and WAITIO
+// board-declared inputs (digital/analog), used by INPUT_DESC/GET and WAITIO
 #if INPUT_COUNT > 0
 __code uint8_t inputPins[INPUT_COUNT] = INPUT_PINS;
 __code uint8_t inputTypes[INPUT_COUNT] = INPUT_TYPES; // 0 = digital, 1 = analog

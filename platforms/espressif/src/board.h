@@ -2,7 +2,7 @@
 #define DUTA_ESP_BOARD_H
 // Target dispatcher for the espressif platform. The PlatformIO env passes a
 // -DBOARD_* flag (see platformio.ini); each flag selects a TARGET under
-// targets/ — our Duta build on a specific vendored board. Default is the
+// targets/, our Duta build on a specific vendored board. Default is the
 // ESP32-S3 DevKitC. See BOARDS.md for the platform → mcu → board → target
 // layering (vendored boards are facts; targets assign the Duta roles).
 
@@ -22,7 +22,7 @@
 #endif
 
 #ifndef BOARD_NAME
-#error "No target selected — define BOARD_ESP32S3 / BOARD_S3_ZERO / BOARD_ESP32C3 / BOARD_ESP32 (see platformio.ini)."
+#error "No target selected: define BOARD_ESP32S3 / BOARD_S3_ZERO / BOARD_ESP32C3 / BOARD_ESP32 (see platformio.ini)."
 #endif
 
 #endif // DUTA_ESP_BOARD_H

@@ -1,4 +1,4 @@
-// skrit_device.h — portable Duta protocol core (header-only, no deps).
+// skrit_device.h: portable Duta protocol core (header-only, no deps).
 // ============================================================================
 // One implementation of the skrit CMD dispatch + skrit-mc macro VM + the
 // dual-CDC / skrit-mux transport framing, shared by every C/C++ platform
@@ -58,7 +58,7 @@ extern "C" {
 typedef struct skrit_hal {
   const char *name;    // device name (DEVICE_NAME / ASCII ID)
   uint16_t fw_ver;     // (hi<<8) | lo
-  uint8_t caps;        // SKRIT_CAP_* — MUST set CAP_MUX iff constructed muxed
+  uint8_t caps;        // SKRIT_CAP_*: MUST set CAP_MUX iff constructed muxed
   uint8_t macro_tier;  // 0..2: highest skrit-mc tier this build runs
   uint8_t store_kb;    // persistent macro store (KB); 0 = scratch-only
   uint8_t n_outputs;   // controllable outputs (digital on/off, PWM, or RGB)
@@ -70,7 +70,7 @@ typedef struct skrit_hal {
   // DATA console out, host -> target UART (macro EMIT; and host DATA on a mux).
   void (*data_write)(void *ctx, const uint8_t *p, uint16_t n);
   // DATA console out, target -> host, DUAL transports only (the raw DATA port).
-  // Leave NULL on a muxed device — the core wraps console bytes onto link_write.
+  // Leave NULL on a muxed device; the core wraps console bytes onto link_write.
   void (*host_write)(void *ctx, const uint8_t *p, uint16_t n);
   // DATA console in: drain up to `cap` bytes from the target UART into `out`,
   // return the count (0 if idle). The core tees these to the host and feeds the
@@ -113,7 +113,7 @@ typedef struct skrit_hal {
   uint32_t (*millis)(void *ctx);
   void (*pump)(void *ctx);
 
-  // ---- network auth (NULL/0 on USB/BLE — those aren't gated). These trail the
+  // ---- network auth (NULL/0 on USB/BLE; those aren't gated). These trail the
   // struct so existing positional HAL initializers zero-fill them. ----
   uint8_t auth_required; // 1 = require AUTH before other CMDs / DATA bridging
   uint8_t (*auth_check)(void *ctx, const char *pw, uint8_t n);    // 1 if pw matches
@@ -128,7 +128,7 @@ typedef struct skrit_hal {
   // ---- PWM frequency/resolution (NULL = fixed; OUTPUT_PWM duty still works) ----
   //   pwm_config_get: report this output's current freq (Hz) + resolution (bits).
   //   pwm_config_set: apply freq/res where supported (0 = leave); return 1 if the
-  //   output is PWM (even if a value couldn't change — the GET reports the truth).
+  //   output is PWM (even if a value couldn't change; the GET reports the truth).
   void (*pwm_config_get)(void *ctx, uint8_t idx, uint32_t *freq, uint8_t *res);
   uint8_t (*pwm_config_set)(void *ctx, uint8_t idx, uint32_t freq, uint8_t res);
 
@@ -405,7 +405,7 @@ static const char *skrit__data_kind_name(uint8_t kind) {
 }
 
 // ===========================================================================
-// CMD dispatch — one decoded frame: TYPE SEQ LEN BODY CRC (already CRC-checked)
+// CMD dispatch: one decoded frame: TYPE SEQ LEN BODY CRC (already CRC-checked)
 // ===========================================================================
 static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
   const skrit_hal *h = d->hal;
@@ -629,7 +629,7 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
   }
   case SKRIT_PIN_CAPS: {
     // index(1) -> status, index, total[, pin(2), caps, warn, bus, name] (the
-    // provisioning menu — offerable pins resolved from mcu ∩ board).
+    // provisioning menu: offerable pins resolved from mcu ∩ board).
     if (!h->pin_caps) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
     if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
     int16_t pin = 0; uint8_t caps = 0, warn = 0, bus = SKRIT_NO_BUS; const char *nm = 0;
@@ -782,7 +782,7 @@ static int skrit__streq(const char *s, const char *t) {
   return *s == '\0';
 }
 static void skrit__ascii_write(skrit_dev *d, const char *s) {
-  // ASCII replies go on the CMD endpoint verbatim (no framing) — on a mux link
+  // ASCII replies go on the CMD endpoint verbatim (no framing); on a mux link
   // they would need wrapping, so ASCII mode is a dual-link convenience only.
   if (d->muxed || !d->hal->link_write) return;
   d->hal->link_write(d->ctx, (const uint8_t *)s, (uint16_t)strlen(s));
@@ -811,7 +811,7 @@ static void skrit__ascii_line(skrit_dev *d) {
 #endif
 
 // ===========================================================================
-// receive state machine — feed every byte that arrives on the CMD/mux endpoint
+// receive state machine: feed every byte that arrives on the CMD/mux endpoint
 // ===========================================================================
 static void skrit__frame_complete(skrit_dev *d) {
   if (d->rx_len == 0) return;

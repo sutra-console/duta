@@ -1,9 +1,9 @@
-// duta_board_io.h — builds the standard duta_outputs[] table from a board's role
+// duta_board_io.h: builds the standard duta_outputs[] table from a board's role
 // macros, so each leaf board header only declares pins, not the table boilerplate.
 // ============================================================================
 // A board header defines RELAY1_PIN / RELAY2_PIN / LED_PIN (and optionally
 // RGB_PIN / RGB_COUNT, RELAY_ACTIVE_LOW, LED_ACTIVE_LOW), then includes this.
-// The table is the *compiled default* — runtime provisioning may replace it.
+// The table is the *compiled default*; runtime provisioning may replace it.
 // A board with a non-standard IO set can skip this and declare duta_outputs[]
 // itself (the shared Arduino driver only requires the array to exist).
 // ============================================================================

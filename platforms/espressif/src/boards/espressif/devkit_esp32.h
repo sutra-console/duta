@@ -1,5 +1,5 @@
-// boards/espressif/devkit_esp32.h — classic ESP32 DevKit (DOIT-style; vendored
-// board). Facts only; a target assigns the Duta roles. No native USB — UART0
+// boards/espressif/devkit_esp32.h: classic ESP32 DevKit (DOIT-style; vendored
+// board). Facts only; a target assigns the Duta roles. No native USB; UART0
 // rides the onboard CP2102.
 #ifndef DUTA_VBOARD_ESPRESSIF_DEVKIT_ESP32_H
 #define DUTA_VBOARD_ESPRESSIF_DEVKIT_ESP32_H
