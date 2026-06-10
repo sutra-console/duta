@@ -34,10 +34,10 @@ static void send_frame(int fd, uint8_t typ, uint8_t seq, const uint8_t *body, ui
   raw[1] = seq;
   raw[2] = len;
   memcpy(raw + 3, body, len);
-  raw[3 + len] = ttlb_crc8(raw, (size_t)(3 + len));
+  raw[3 + len] = skrit_crc8(raw, (size_t)(3 + len));
 
   uint8_t cobs[sizeof(raw) + 8];
-  size_t n = ttlb_cobs_encode(raw, (size_t)(3 + len + 1), cobs);
+  size_t n = skrit_cobs_encode(raw, (size_t)(3 + len + 1), cobs);
 
   uint8_t out[sizeof(cobs) + 2];
   out[0] = 0x00;
@@ -52,7 +52,7 @@ static void handle(int fd, const uint8_t *p, size_t n) {
   uint8_t typ = p[0], seq = p[1], len = p[2];
   if ((size_t)(3 + len + 1) > n)
     return;
-  if (ttlb_crc8(p, (size_t)(3 + len)) != p[3 + len])
+  if (skrit_crc8(p, (size_t)(3 + len)) != p[3 + len])
     return;
   const uint8_t *b = p + 3;
 
@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
         if (byte == 0x00) {
           if (acc_len) {
             uint8_t dec[600];
-            size_t dl = ttlb_cobs_decode(acc, acc_len, dec);
+            size_t dl = skrit_cobs_decode(acc, acc_len, dec);
             handle(c, dec, dl);
             acc_len = 0;
           }

@@ -1,14 +1,17 @@
 # skrit — CMD-port wire protocol
 
-The device exposes **two USB-CDC interfaces**:
+The device exposes the two roles below. How they map onto the wire depends on the
+**transport** (see *Transports*): a dual-CDC device gives them two USB interfaces; a
+single-channel device (single USB-CDC, TCP, BLE) carries both over one stream via
+*skrit-mux*.
 
-| Interface | Role | Framing |
-|-----------|------|---------|
-| **DATA** (MI_00) | transparent USB↔UART bridge — the target console | **raw bytes**, no framing |
-| **CMD** (MI_02) | control / macros / config | this protocol |
+| Role | Job | Framing |
+|------|-----|---------|
+| **DATA** | transparent USB↔UART bridge — the target console | **raw bytes**, no framing |
+| **CMD** | control / macros / config | this protocol |
 
-The **DATA** port is never framed — it carries the target's serial console verbatim
-and is what the terminal widget renders. Everything below is the **CMD** port only.
+The **DATA** role is never framed — it carries the target's serial console verbatim
+and is what the terminal widget renders. Everything below is the **CMD** role only.
 
 The CMD port speaks **two interchangeable modes** so it stays debuggable by hand while
 being efficient for the app:
@@ -86,12 +89,18 @@ A malformed or unknown request still gets a response (`TYPE|0x80`, `SEQ` echoed,
 | `0x01` | `PING` | — | `"PONG"` |
 | `0x02` | `INFO` | — | `fw_ver(2)`, `caps(1)`, `n_outputs(1)`, `store_kb(1)`, `proto_ver(1)`, `n_inputs(1)`, `macro_tier(1)` |
 | `0x03` | `DEVICE_NAME` | — | device name string |
+| `0x04` | `REBOOT` | `mode(1)` | — (replies OK, then reboots). `mode` 0=app reset, 1=bootloader/DFU. Needs `CAP_REBOOT`. |
 | `0x10` | `OUTPUT_SET` | `index(1)`, `value(1)` | — | sets relay/LED. index: 0=R1,1=R2,2=LED |
 | `0x11` | `OUTPUT_GET` | — | `bitmap(1)` (bit0=R1,bit1=R2,bit2=LED) |
 | `0x12` | `OUTPUT_TOGGLE` | `index(1)` | `bitmap(1)` |
-| `0x13` | `OUTPUT_DESC` | `index(1)` | `index(1)`, `type(1)`, `name…` (type 0=relay, 1=led) |
+| `0x13` | `OUTPUT_DESC` | `index(1)` | `index(1)`, `type(1)`, `name…` (type 0=relay, 1=led, 2=button, 3=pwm) |
 | `0x14` | `INPUT_DESC` | `index(1)` | `index(1)`, `type(1)`, `name…` (type 0=digital, 1=analog) |
 | `0x15` | `INPUT_GET` | `index(1)` | `index(1)`, `value(2)` (digital 0/1, analog 0-1023) |
+| `0x16` | `OUTPUT_PULSE` | `index(1)`, `ms(2)` | — | drive output on, restore after `ms` (a momentary button — reset/power lines). |
+| `0x17` | `SERIAL_GET` | — | `baud(4)`, `data_bits(1)`, `parity(1)`, `stop_bits(1)` — the DATA-UART config. |
+| `0x18` | `SERIAL_SET` | `baud(4)`, `data_bits(1)`, `parity(1)`, `stop_bits(1)` | — | reconfigure DATA UART (works even on a muxed link where USB line-coding isn't available). Needs `CAP_SERIAL`. |
+| `0x19` | `SERIAL_SIGNAL` | `mask(1)`, `value(1)` | — | drive DATA modem/break lines. bit0=DTR, bit1=RTS, bit2=BREAK. Lets a host sequence ESP32 / AVR bootloader entry. Needs `CAP_SERIAL`. |
+| `0x1A` | `OUTPUT_PWM` | `index(1)`[, `duty(2)`] | `index(1)`, `duty(2)` | with `duty` (0–1023) = set the output's PWM duty; without = read it back. Needs `CAP_PWM`; non-PWM outputs answer `0x03`. A PWM output still honors `OUTPUT_SET` (0 = duty 0, 1 = full). |
 | `0x20` | `MACRO_LIST` | `start(1)` | `count(1)`, then repeated `{id(1), name_len(1), name…}` until frame full; more via next `start`. |
 | `0x21` | `MACRO_META` | `id(1)` | `id(1)`, `len(2)`, `name_len(1)`, `name…` |
 | `0x22` | `MACRO_READ` | `id(1)`, `off(2)`, `n(1)` | `bytes…` (n ≤ 64) |
@@ -107,7 +116,9 @@ A malformed or unknown request still gets a response (`TYPE|0x80`, `SEQ` echoed,
 
 Multi-byte integers are **little-endian** (matches SDCC and `x86`/`arm` hosts).
 
-`caps` bitfield (INFO): bit0=persists-macros, bit1=has-OLED, bit2=has-SPI-flash, bit3=parity.
+`caps` bitfield (INFO): bit0=persists-macros, bit1=has-OLED, bit2=has-SPI-flash,
+bit3=parity, **bit4=muxed** (one endpoint carries both channels — see *skrit-mux*),
+bit5=serial-control (`SERIAL_*`), bit6=reboot (`REBOOT`), bit7=pwm (`OUTPUT_PWM`).
 
 `macro_tier` (INFO): the highest **skrit-mc** tier the device's VM executes — `0`=none (no
 on-device macros), `1`=open-loop replay (`EMIT`/`DELAY`/`SETOUT`), `2`=+closed-loop
@@ -155,6 +166,7 @@ mc_ver   = 0x01
 | `0x01` | `EMIT`   | `n(1)`, `bytes[n]` | 1 | write `bytes` to DATA/UART |
 | `0x02` | `DELAY`  | `ms(2)` | 1 | pause |
 | `0x03` | `SETOUT` | `index(1)`, `val(1)` | 1 | drive output `index` (0/1) |
+| `0x04` | `SETPWM` | `index(1)`, `duty(2)` | 1 | set output `index` PWM duty (0–1023); no-op without `CAP_PWM` |
 | `0x10` | `EXPECT` | `timeout(2)`, `n(1)`, `bytes[n]` | 2 | match `bytes` on incoming DATA; sets outcome (match=OK, timeout=FAIL) |
 | `0x11` | `WAITIO` | `index(1)`, `cmp(1)`, `val(2)`, `timeout(2)` | 2 | poll input `index` until `value cmp val`; sets outcome (met=OK, timeout=FAIL) |
 | `0x12` | `WAITOK` | — | 2 | if last outcome is FAIL, halt the run with `STATUS` failed |
@@ -218,8 +230,60 @@ ASCII stays for humans.
 
 ---
 
+## Transports
+
+skrit is transport-independent. A device picks **one** of these; the app discovers
+which from `INFO.caps` (the `muxed` bit) and how it connected.
+
+### Dual-CDC (e.g. CH552)
+
+Two USB-CDC interfaces: **DATA** (MI_00) is the raw console; **CMD** (MI_02) speaks the
+binary/ASCII protocol above. Nothing is multiplexed — each role owns a port. This is
+the cheapest path on an MCU with composite-USB silicon.
+
+### skrit-mux — one channel, both roles
+
+Single-channel transports — a single USB-CDC (ESP32-S3, RP2040, nRF52840 over one CDC
+ACM), a **TCP** socket (WiFi bridge), or **BLE** (a NUS GATT pipe) — carry **both**
+roles over one byte stream. Every packet is a COBS frame with a 1-byte **channel** tag:
+
+```
+0x00 , COBS( CHANNEL , payload... ) , 0x00
+
+CHANNEL 0x00  DATA  -> payload is raw target-console bytes
+CHANNEL 0x01  CMD   -> payload is a CMD frame:  TYPE SEQ LEN BODY[LEN] CRC8
+```
+
+COBS removes every `0x00` from the body, so the delimiters stay unambiguous and the
+link resyncs after a glitch — exactly like the CMD framing, with one extra tag byte.
+The **CMD payload is byte-identical** to the dual-CDC CMD frame: a device that
+implements the CMD dispatch already has the hard part; mux just prepends a channel
+tag and routes DATA inline. A muxed device sets the **`muxed`** capability bit in
+`INFO` so the app knows to wrap/unwrap rather than open a second port.
+
+DATA payloads should stay ≤ 240 B so COBS overhead is a single byte; larger console
+bursts are split across frames (order is preserved). There is no CRC on the DATA
+channel — it mirrors the lossless, unframed nature of the raw console port.
+
+## Async events
+
+A device MAY push **unsolicited** frames in the `0x50..0x5F` range — these have the
+`SKRIT_RESP` bit **clear** and `SEQ = 0`, so a host routes them to an event sink
+instead of the reply-matcher (which only ever waits on a `TYPE | 0x80` with a matching
+`SEQ`). Events are advisory; a host that ignores them loses nothing.
+
+| TYPE | name | body | meaning |
+|------|------|------|---------|
+| `0x50` | `EVENT_LOG` | `text…` | a device log line (e.g. on-device macro progress) |
+| `0x51` | `EVENT_INPUT` | `index(1)`, `value(2)` | an input crossed an edge / threshold |
+
+Events ride the CMD channel (or, on a muxed link, `CHANNEL=CMD`). They carry no CRC
+beyond the frame's own; a host treats a malformed event as a no-op.
+
 ## Versioning
 
-`proto_ver` starts at **1**. Additive changes (new TYPEs) keep the same version;
-breaking changes bump it. The app reads `INFO` on connect and refuses mismatched
-major versions.
+`proto_ver` starts at **1**. Additive changes — new `TYPE`s (`REBOOT`, `OUTPUT_PULSE`,
+`SERIAL_*`, the `0x50` events), new `caps` bits, and the *skrit-mux* channel tag — keep
+the same version: an older app simply doesn't send or decode them and a newer device
+still answers the v1 core. Breaking changes bump it. The app reads `INFO` on connect
+and refuses mismatched major versions.

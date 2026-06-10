@@ -1,7 +1,9 @@
 # Duta firmware build targets.
 #
 # CI builds every target below on push/PR. Fork the repo, add your board here,
-# and you inherit the whole build system. `transport` is informational for now.
+# and you inherit the whole build system (the shared core in platforms/common).
+# `transport`: how DATA + CMD reach the host — `usb-dual-cdc` = two ports;
+# `usb-mux` / `tcp` / `ble` = one channel carrying both via skrit-mux.
 targets:
   - platform: ch55xduino
     board: weact_ch552
@@ -16,9 +18,37 @@ targets:
     transport: usb-dual-cdc
 
   - platform: espressif
+    board: esp32-s3-devkitc-1
+    env: esp32s3
+    transport: usb-mux
+
+  - platform: espressif
     board: esp32-c3-devkitm-1
     env: esp32c3
-    transport: usb-serial
+    transport: usb-mux
+
+  - platform: espressif
+    board: esp32dev
+    env: esp32
+    transport: usb-mux
+
+  - platform: pico
+    board: rpipico
+    env: pico
+    transport: usb-mux
+
+  - platform: pico
+    board: rpipico2
+    env: pico2
+    transport: usb-mux
+
+  - platform: zephyr
+    board: nrf52840dk/nrf52840
+    transport: usb-mux
+
+  - platform: zephyr
+    board: nrf52840dongle/nrf52840
+    transport: usb-mux
 
   - platform: zephyr
     board: native_sim

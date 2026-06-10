@@ -7,11 +7,12 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: main
+      revision: v4.2.0 # pinned so CI doesn't chase main; bump deliberately
       import:
-        # Keep the CI clone lean — only what native_sim needs.
+        # Keep the CI clone lean — just what native_sim + nRF52840 need.
         name-allowlist:
           - cmsis
+          - cmsis_6
           - hal_nordic
           - picolibc
   self:

@@ -14,17 +14,27 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Wire protocol version, reported as INFO body[6]. Additive changes (new TYPEs,
+// new caps bits, the skrit-mux channel tag) keep this; breaking changes bump it.
+#define SKRIT_PROTO_VER 1
+
 // ---- message types (response = request | SKRIT_RESP) ----
 enum {
   SKRIT_PING = 0x01,
   SKRIT_INFO = 0x02,
   SKRIT_DEVICE_NAME = 0x03, // self-describe: device name string
+  SKRIT_REBOOT = 0x04,      // mode(1): 0=app reset, 1=bootloader/DFU. OK then reboots.
   SKRIT_OUT_SET = 0x10,
   SKRIT_OUT_GET = 0x11,
   SKRIT_OUT_TOGGLE = 0x12,
   SKRIT_OUT_DESC = 0x13,  // self-describe output: {index, type, name}
   SKRIT_INPUT_DESC = 0x14, // self-describe input: {index, type, name}
   SKRIT_INPUT_GET = 0x15,  // read input value (digital 0/1, analog 0-1023)
+  SKRIT_OUT_PULSE = 0x16,  // index(1), ms(2): drive output on, restore after ms (momentary)
+  SKRIT_SERIAL_GET = 0x17, // -> baud(4), data_bits(1), parity(1), stop_bits(1)  (DATA UART)
+  SKRIT_SERIAL_SET = 0x18, // baud(4), data_bits(1), parity(1), stop_bits(1)
+  SKRIT_SERIAL_SIGNAL = 0x19, // mask(1), value(1): drive DATA modem/break lines (see SKRIT_SIG_*)
+  SKRIT_OUT_PWM = 0x1A, // index(1)[, duty(2)]: with duty = set PWM 0..1023; without = read back duty(2)
   SKRIT_MACRO_LIST = 0x20,
   SKRIT_MACRO_META = 0x21,
   SKRIT_MACRO_READ = 0x22,
@@ -33,8 +43,30 @@ enum {
   SKRIT_MACRO_WRITE_END = 0x25,
   SKRIT_MACRO_DELETE = 0x26,
   SKRIT_MACRO_RUN = 0x27,
+  SKRIT_EE_READ = 0x30,
+  SKRIT_EE_WRITE = 0x31,
+  SKRIT_CFG_GET = 0x40,
+  SKRIT_CFG_SET = 0x41,
+  // Async device->host events (0x50..0x5F): RESP bit clear, SEQ=0, NOT request/reply.
+  // A host routes TYPE in this range to an event sink, never the seq-matcher.
+  SKRIT_EVENT_LOG = 0x50,   // text(...): device log line (e.g. macro progress)
+  SKRIT_EVENT_INPUT = 0x51, // index(1), value(2): an input changed (edge / threshold)
 };
 #define SKRIT_RESP 0x80
+#define SKRIT_EVENT_LO 0x50 // inclusive range of async event TYPEs
+#define SKRIT_EVENT_HI 0x5F
+
+// ---- DATA-UART parity (SERIAL_GET/SET parity byte) ----
+enum { SKRIT_PAR_NONE = 0, SKRIT_PAR_ODD = 1, SKRIT_PAR_EVEN = 2 };
+
+// ---- DATA modem/break line bits (SERIAL_SIGNAL mask/value) ----
+// Mask selects which lines to act on; value gives the level (1=asserted). The
+// BREAK bit in `value` asserts a line break for the device's default break
+// window. Driving DTR/RTS lets a host enter ESP32 / AVR bootloaders by hand.
+enum { SKRIT_SIG_DTR = 0x01, SKRIT_SIG_RTS = 0x02, SKRIT_SIG_BREAK = 0x04 };
+
+// ---- REBOOT modes ----
+enum { SKRIT_REBOOT_APP = 0, SKRIT_REBOOT_BOOTLOADER = 1 };
 
 // ---- status codes (response body[0]) ----
 enum {
@@ -50,11 +82,32 @@ enum {
 
 // ---- capability bits (INFO body[3]) ----
 enum {
-  SKRIT_CAP_STORE = 0x01,
-  SKRIT_CAP_OLED = 0x02,
-  SKRIT_CAP_SPI = 0x04,
-  SKRIT_CAP_PARITY = 0x08,
+  SKRIT_CAP_STORE = 0x01,  // persists macros (MACRO_WRITE_* survive reboot)
+  SKRIT_CAP_OLED = 0x02,   // has an OLED mirror
+  SKRIT_CAP_SPI = 0x04,    // has SPI flash
+  SKRIT_CAP_PARITY = 0x08, // DATA UART can do parity
+  SKRIT_CAP_MUX = 0x10,    // a single endpoint carries BOTH channels (see skrit-mux)
+  SKRIT_CAP_SERIAL = 0x20, // honors SERIAL_GET/SET/SIGNAL on the DATA UART
+  SKRIT_CAP_REBOOT = 0x40, // honors REBOOT (incl. reboot-to-bootloader)
+  SKRIT_CAP_PWM = 0x80,    // honors OUT_PWM on at least one output
 };
+
+// ===========================================================================
+// skrit-mux — one byte stream carrying BOTH the DATA console and the CMD
+// protocol, for transports with a single channel (single USB-CDC, TCP, BLE).
+// Dual-CDC devices (e.g. CH552) do NOT mux: DATA is its own raw port. A muxed
+// device sets SKRIT_CAP_MUX in INFO.
+//
+//   wire:  0x00 , COBS( CHANNEL , payload... ) , 0x00
+//
+//   CHANNEL = SKRIT_MUX_DATA -> payload is raw target-console bytes
+//   CHANNEL = SKRIT_MUX_CMD  -> payload is a CMD frame: TYPE SEQ LEN BODY CRC8
+//
+// COBS already removes 0x00 from the body, so the delimiters stay unambiguous
+// and the link resyncs after a glitch. The CMD payload is byte-identical to the
+// dual-CDC CMD frame — only a 1-byte channel tag is prepended before COBS.
+// ===========================================================================
+enum { SKRIT_MUX_DATA = 0x00, SKRIT_MUX_CMD = 0x01 };
 
 // ---- skrit-mc macro bytecode (see PROTOCOL.md "Macro bytecode") ----
 // A program is: SKRIT_MC_VER(1), op..., SKRIT_MC_END. Multi-byte operands are LE.
@@ -65,6 +118,7 @@ enum {                        // opcodes (low nibble groups by tier)
   SKRIT_MC_EMIT = 0x01,       // n(1), bytes[n]            -> DATA/UART   [tier 1]
   SKRIT_MC_DELAY = 0x02,      // ms(2)                                    [tier 1]
   SKRIT_MC_SETOUT = 0x03,     // index(1), val(1)                         [tier 1]
+  SKRIT_MC_SETPWM = 0x04,     // index(1), duty(2) 0..1023                [tier 1]
   SKRIT_MC_EXPECT = 0x10,     // timeout(2), n(1), bytes[n] -> outcome    [tier 2]
   SKRIT_MC_WAITIO = 0x11,     // index(1), cmp(1), val(2), timeout(2)     [tier 2]
   SKRIT_MC_WAITOK = 0x12,     // halt FAIL if last outcome is FAIL        [tier 2]
@@ -81,13 +135,14 @@ enum {
 enum { SKRIT_TIER_NONE = 0, SKRIT_TIER_REPLAY = 1, SKRIT_TIER_INTERACTIVE = 2, SKRIT_TIER_APP = 3 };
 
 // ---- output control types (OUT_DESC body[2]) ----
-enum { SKRIT_CTRL_RELAY = 0, SKRIT_CTRL_LED = 1, SKRIT_CTRL_BUTTON = 2 };
+// A PWM output also answers OUT_SET/TOGGLE (0 = duty 0, 1 = full duty).
+enum { SKRIT_CTRL_RELAY = 0, SKRIT_CTRL_LED = 1, SKRIT_CTRL_BUTTON = 2, SKRIT_CTRL_PWM = 3 };
 
 // ---- input types (INPUT_DESC body[2]) ----
 enum { SKRIT_IN_DIGITAL = 0, SKRIT_IN_ANALOG = 1 };
 
 // ---- CRC-8/ATM (poly 0x07, init 0x00) ----
-static inline uint8_t ttlb_crc8(const uint8_t *p, size_t n) {
+static inline uint8_t skrit_crc8(const uint8_t *p, size_t n) {
   uint8_t c = 0;
   for (size_t i = 0; i < n; i++) {
     c ^= p[i];
@@ -100,7 +155,7 @@ static inline uint8_t ttlb_crc8(const uint8_t *p, size_t n) {
 // ---- COBS (canonical) ----
 // Encode `len` bytes from `in` into `out` (no delimiters). `out` must hold at
 // least len + len/254 + 2 bytes. Returns the encoded length.
-static inline size_t ttlb_cobs_encode(const uint8_t *in, size_t len, uint8_t *out) {
+static inline size_t skrit_cobs_encode(const uint8_t *in, size_t len, uint8_t *out) {
   uint8_t *enc = out;
   uint8_t *code_ptr = enc++;
   uint8_t code = 1;
@@ -124,7 +179,7 @@ static inline size_t ttlb_cobs_encode(const uint8_t *in, size_t len, uint8_t *ou
 
 // Decode `len` COBS bytes from `in` (delimiters already stripped) into `out`.
 // Returns the decoded length.
-static inline size_t ttlb_cobs_decode(const uint8_t *in, size_t len, uint8_t *out) {
+static inline size_t skrit_cobs_decode(const uint8_t *in, size_t len, uint8_t *out) {
   const uint8_t *byte = in;
   uint8_t *dec = out;
   for (uint8_t code = 0xFF, block = 0; byte < in + len; --block) {

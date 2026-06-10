@@ -1,9 +1,9 @@
-// Duta on ESP32 / ESP32-S3 / ESP32-C3 (Arduino + PlatformIO).
+// Duta on Raspberry Pi Pico / Pico 2 (RP2040 / RP2350, Arduino + PlatformIO).
 // ============================================================================
 // A real Duta adapter built on the shared core (../../common/skrit_device.h):
 //
-//   * DATA console  — a hardware UART (Serial1 on DATA_TX/DATA_RX) bridged to
-//                     the target, full duplex.
+//   * DATA console  — a hardware UART (Serial1 = UART0 on DATA_TX/DATA_RX)
+//                     bridged to the target, full duplex.
 //   * CMD + DATA    — multiplexed over the single native USB-CDC via skrit-mux,
 //                     so the Sutra app opens ONE port and gets both.
 //   * Controls      — 2 relays + an aux LED, self-describing.
@@ -11,10 +11,10 @@
 //                     scratch push-and-run (no flash wear).
 //   * Serial control— SERIAL_GET/SET reconfigures the DATA UART; SERIAL_SIGNAL
 //                     drives DTR/RTS (auto-reset into ESP/AVR bootloaders) + BREAK.
-//   * REBOOT        — app reset, or reboot-to-download on S3/C3.
+//   * REBOOT        — app reset, or reboot-to-UF2-bootloader (BOOTSEL/DFU).
 //
 // The protocol/CRC/COBS/VM all live in the shared core; this file is just the
-// ESP HAL + the two-line main loop.
+// RP2040/RP2350 HAL + the two-line main loop.
 #include <Arduino.h>
 
 #include "board.h"
@@ -22,16 +22,12 @@ extern "C" {
 #include "skrit_device.h"
 }
 
-#if defined(BOARD_ESP32S3) || defined(BOARD_ESP32C3)
-#include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG — force download (DFU) boot
-#endif
-
 #define FW_LO 0x04
 #define FW_HI 0x00
 
-// Serial1 is the bridged target UART. On the classic ESP32 it also exists; on
-// S3/C3 the USB-CDC is `Serial`, leaving Serial1 free for the console.
-static HardwareSerial &TARGET = Serial1;
+// Serial1 is UART0 — the bridged target console. `Serial` is the native USB-CDC,
+// which carries the mux link (CMD + DATA) to the host.
+static SerialUART &TARGET = Serial1;
 
 static uint32_t g_baud = 115200;
 static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
@@ -39,8 +35,8 @@ static uint8_t g_out[3]; // relay1, relay2, led
 
 static const char *const OUT_NAME[3] = {"Relay 1", "Relay 2", "Aux LED"};
 static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_PWM};
-static const int8_t OUT_PIN[3] = {RELAY1_PIN, RELAY2_PIN, LED_PIN};
 static uint16_t g_pwm[3]; // duty 0..1023 (only the LED channel is PWM-capable)
+static const int8_t OUT_PIN[3] = {RELAY1_PIN, RELAY2_PIN, LED_PIN};
 
 static skrit_dev dev;
 
@@ -65,7 +61,9 @@ static uint32_t serialConfig(uint8_t bits, uint8_t par, uint8_t stop) {
 }
 
 static void beginTarget() {
-  TARGET.begin(g_baud, serialConfig(g_bits, g_parity, g_stop), DATA_RX_PIN, DATA_TX_PIN);
+  TARGET.setTX(DATA_TX_PIN);
+  TARGET.setRX(DATA_RX_PIN);
+  TARGET.begin(g_baud, serialConfig(g_bits, g_parity, g_stop));
 }
 
 // ---- HAL callbacks ---------------------------------------------------------
@@ -86,14 +84,13 @@ static void hal_out_desc(void *, uint8_t idx, uint8_t *type, const char **name) 
   *name = OUT_NAME[idx];
 }
 
-// PWM rides the Arduino LEDC-backed analogWrite (8-bit) on the LED channel.
-// Relays are mechanical — they stay strictly on/off.
+// PWM rides the hardware-PWM-backed analogWrite on the LED channel (the range
+// is set to 0..1023 in setup). Relays are mechanical — strictly on/off.
 static uint8_t hal_pwm_set(void *, uint8_t idx, uint16_t duty) {
   if (idx > 2 || OUT_TYPE[idx] != SKRIT_CTRL_PWM) return 0;
   g_pwm[idx] = duty;
   g_out[idx] = duty > 0;
-  uint16_t v = duty >> 2; // 0..1023 -> 0..255
-  analogWrite(OUT_PIN[idx], LED_ACTIVE_LOW ? (255 - v) : v);
+  analogWrite(OUT_PIN[idx], LED_ACTIVE_LOW ? (1023 - duty) : duty);
   return 1;
 }
 static uint16_t hal_pwm_get(void *, uint8_t idx) { return idx < 3 ? g_pwm[idx] : 0; }
@@ -132,18 +129,17 @@ static void hal_serial_signal(void *, uint8_t mask, uint8_t value) {
 
 static void hal_reboot(void *, uint8_t mode) {
   Serial.flush();
-#if defined(BOARD_ESP32S3) || defined(BOARD_ESP32C3)
   if (mode == SKRIT_REBOOT_BOOTLOADER) {
-    // Latch the ROM download/DFU path, then reset — the native USB re-enumerates
-    // as the serial/JTAG downloader (no BOOT-button dance needed).
-    REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+    // Drop into the RP2040/RP2350 ROM UF2 bootloader — the native USB
+    // re-enumerates as the RPI-RP2 mass-storage device (no BOOTSEL dance).
+    rp2040.rebootToBootloader();
+  } else {
+    rp2040.reboot();
   }
-#endif
-  esp_restart();
 }
 
 static uint32_t hal_millis(void *) { return millis(); }
-static void hal_pump(void *) { yield(); }
+static void hal_pump(void *) {} // earlephilhower core services USB in the background
 
 static const skrit_hal HAL = {
     /*name*/ BOARD_NAME,
@@ -170,8 +166,9 @@ void setup() {
   }
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
+  analogWriteRange(1023); // PWM duty in skrit units (OUT_PWM is 0..1023)
 
-  Serial.begin(115200); // USB-CDC (S3/C3) or UART0-USB (classic) — the mux link
+  Serial.begin(115200); // native USB-CDC — the mux link
   beginTarget();
 
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);

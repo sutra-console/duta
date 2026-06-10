@@ -8,7 +8,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ---- CH55x: the authoritative firmware build ----
+  # ---- vendored protocol must match the canonical skrit repo ----
+  protocol-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diff against sutra-console/skrit @ main
+        run: |
+          git clone --depth 1 https://github.com/sutra-console/skrit /tmp/skrit
+          diff -u /tmp/skrit/protocol.h protocol/protocol.h
+          diff -u /tmp/skrit/PROTOCOL.md protocol/PROTOCOL.md
+          echo "vendored protocol/ is in sync with skrit@main"
+
+  # ---- shared core: hardware-free protocol/VM/mux tests, must pass ----
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + run the core test (mock HAL)
+        run: |
+          cc -std=c11 -Wall -Wextra \
+            -I platforms/common -I protocol \
+            platforms/common/test_core.c -o /tmp/test_core
+          /tmp/test_core
+
+  # ---- CH55x: the authoritative dual-CDC firmware build ----
   ch55xduino:
     runs-on: ubuntu-latest
     env:
@@ -38,22 +62,40 @@ jobs:
       - run: cmake -B platforms/host/build platforms/host
       - run: cmake --build platforms/host/build
 
-  # ---- ESP32 skeleton (scaffold; allowed to fail until fleshed out) ----
+  # ---- ESP32 family (Arduino/PlatformIO) ----
   espressif:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    strategy:
+      matrix:
+        env: [esp32s3, esp32c3, esp32]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
       - run: pip install --upgrade platformio
-      - run: pio run -d platforms/espressif -e esp32c3
+      - run: pio run -d platforms/espressif -e ${{ matrix.env }}
 
-  # ---- Zephyr skeleton (scaffold; allowed to fail until fleshed out) ----
+  # ---- Raspberry Pi Pico / Pico 2 (arduino-pico / PlatformIO) ----
+  pico:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: [pico, pico2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: pip install --upgrade platformio
+      - run: pio run -d platforms/pico -e ${{ matrix.env }}
+
+  # ---- Zephyr: native_sim (must pass) + nRF52840 DK ----
   zephyr:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    strategy:
+      matrix:
+        board: [native_sim, nrf52840dk/nrf52840]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,5 +105,5 @@ jobs:
           app-path: duta/platforms/zephyr
           manifest-file-name: west.yml
           toolchains: all
-      - run: west build -b native_sim duta/platforms/zephyr
+      - run: west build -b ${{ matrix.board }} duta/platforms/zephyr
         working-directory: ${{ github.workspace }}
