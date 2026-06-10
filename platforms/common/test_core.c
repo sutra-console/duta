@@ -172,6 +172,20 @@ int main(void){
     assert(r[3]==SKRIT_ST_OK && rgb[0][0]==0x01 && rgb[2][2]==0x03); } // whole strip filled
   printf("macro SETRGB ok\n");
 
+  // ---- DATA_DESC: default UART, and a CAN device ----
+  link_n = 0; feed_cmd(&dev, SKRIT_DATA_DESC, 30, NULL, 0, 1); last_resp(r, 1);
+  assert(r[3] == SKRIT_ST_OK && r[4] == SKRIT_DATA_UART &&
+         r[5] == 'U' && r[6] == 'A' && r[7] == 'R' && r[8] == 'T');
+  {
+    skrit_hal chal = hal;
+    chal.data_kind = SKRIT_DATA_CAN;
+    skrit_dev cdev;
+    skrit_dev_init(&cdev, &chal, NULL, 1);
+    link_n = 0; feed_cmd(&cdev, SKRIT_DATA_DESC, 31, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK && r[4] == SKRIT_DATA_CAN && r[5] == 'C' && r[6] == 'A' && r[7] == 'N');
+  }
+  printf("DATA_DESC uart/can ok\n");
+
   // ---- DUAL link: PING is a bare COBS frame (no channel tag) ----
   skrit_dev_init(&dev,&hal,NULL,0);
   link_n=0; feed_cmd(&dev,SKRIT_PING,9,NULL,0,0); rn=last_resp(r,0);

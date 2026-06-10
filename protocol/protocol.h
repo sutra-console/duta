@@ -26,6 +26,7 @@ enum {
   SKRIT_REBOOT = 0x04,      // mode(1): 0=app reset, 1=bootloader/DFU. OK then reboots.
   SKRIT_AUTH = 0x05,        // password(...): authenticate the session (network transports)
   SKRIT_AUTH_SET = 0x06,    // new_password(...): change the password (must be authed)
+  SKRIT_DATA_DESC = 0x07,   // -> kind(1), name string: what the DATA channel carries
   SKRIT_OUT_SET = 0x10,
   SKRIT_OUT_GET = 0x11,
   SKRIT_OUT_TOGGLE = 0x12,
@@ -167,6 +168,18 @@ enum {
 
 // ---- input types (INPUT_DESC body[2]) ----
 enum { SKRIT_IN_DIGITAL = 0, SKRIT_IN_ANALOG = 1 };
+
+// ---- DATA medium (DATA_DESC kind) — what the bridged channel carries. UART is
+// the default (a raw byte console); the rest are the roadmap. A device that
+// doesn't answer DATA_DESC is treated as UART, so nothing regresses.
+enum {
+  SKRIT_DATA_UART = 0,      // raw byte console (the Serial Console)
+  SKRIT_DATA_CAN = 1,       // CAN frames
+  SKRIT_DATA_RS485 = 2,     // RS-485
+  SKRIT_DATA_SPI = 3,       // SPI
+  SKRIT_DATA_BLE_SNIFF = 4, // sniffed BLE packets
+  SKRIT_DATA_LOGIC = 5,     // logic-analyzer samples
+};
 
 // ---- CRC-8/ATM (poly 0x07, init 0x00) ----
 static inline uint8_t skrit_crc8(const uint8_t *p, size_t n) {

@@ -119,6 +119,11 @@ typedef struct skrit_hal {
   uint8_t (*auth_check)(void *ctx, const char *pw, uint8_t n);    // 1 if pw matches
   uint8_t (*auth_set)(void *ctx, const char *pw, uint8_t n);      // store new pw; 1 = ok
   uint8_t (*auth_is_default)(void *ctx);                          // 1 if still factory default
+
+  // ---- DATA medium (what the bridged channel carries). 0 = UART console (the
+  // default; trails the struct so positional initializers zero-fill it). ----
+  uint8_t data_kind;     // SKRIT_DATA_*
+  const char *data_name; // optional label; NULL -> a built-in name per kind
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -364,6 +369,18 @@ static uint8_t skrit__run_program(skrit_dev *d, const uint8_t *prog, uint16_t le
   return SKRIT_ST_OK;
 }
 
+// Built-in label for a DATA medium kind (used when the HAL gives no data_name).
+static const char *skrit__data_kind_name(uint8_t kind) {
+  switch (kind) {
+  case SKRIT_DATA_CAN: return "CAN";
+  case SKRIT_DATA_RS485: return "RS-485";
+  case SKRIT_DATA_SPI: return "SPI";
+  case SKRIT_DATA_BLE_SNIFF: return "BLE sniffer";
+  case SKRIT_DATA_LOGIC: return "Logic";
+  default: return "UART";
+  }
+}
+
 // ===========================================================================
 // CMD dispatch — one decoded frame: TYPE SEQ LEN BODY CRC (already CRC-checked)
 // ===========================================================================
@@ -415,6 +432,14 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     else if (h->auth_set(d->ctx, (const char *)b, len)) skrit__status(d, type, seq, SKRIT_ST_OK);
     else skrit__status(d, type, seq, SKRIT_ST_STORAGE);
     break;
+  case SKRIT_DATA_DESC: {
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = h->data_kind;
+    const char *nm = h->data_name ? h->data_name : skrit__data_kind_name(h->data_kind);
+    while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
   case SKRIT_DEVICE_NAME: {
     body[bl++] = SKRIT_ST_OK;
     const char *s = h->name ? h->name : "Duta";
