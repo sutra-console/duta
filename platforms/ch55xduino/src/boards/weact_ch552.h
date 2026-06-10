@@ -3,6 +3,7 @@
 
 // WeAct Studio CH552 core board (V1.0). Schematic-verified.
 #define BOARD_NAME "WeAct CH552"
+#define BOARD_VENDOR "WeAct Studio"
 
 // Relays — typical active-LOW relay modules (drive LOW = ON).
 #define RELAY1_PIN       34 // P3.4

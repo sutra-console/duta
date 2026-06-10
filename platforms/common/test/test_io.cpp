@@ -3,7 +3,7 @@
 #include "Arduino.h"
 #include "protocol.h"
 #include "duta_io.h"   // descriptor type (board.h includes this first)
-int pin_level[64], pin_pwm[64], pin_mode_[64], awres;
+int pin_level[64], pin_pwm[64], pin_mode_[64], awres, awfreq;
 
 // board declares the tables...
 #define DUTA_HAVE_INPUTS

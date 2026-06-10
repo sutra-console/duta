@@ -54,4 +54,9 @@
 #define INPUT_COUNT 0
 #endif
 
+// Vendor is self-described (grouping in the app); harmless default if a board omits it.
+#ifndef BOARD_VENDOR
+#define BOARD_VENDOR "Generic"
+#endif
+
 #endif

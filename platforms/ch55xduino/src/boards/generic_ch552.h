@@ -4,6 +4,7 @@
 // Generic CH552 (CH552G/T) breakout. Pins chosen to exist on most boards and
 // avoid USB (P3.6/P3.7) and the UART0 bridge (P3.0/P3.1). Adjust for your wiring.
 #define BOARD_NAME "Generic CH552"
+#define BOARD_VENDOR "Generic"
 
 #define RELAY1_PIN       34 // P3.4
 #define RELAY2_PIN       33 // P3.3

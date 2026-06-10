@@ -5,6 +5,7 @@
 // BOARD_CUSTOM in src/config.h. Pin numbers are ch55xduino style: Px.y -> x*10+y
 // (e.g. P3.4 -> 34, P1.6 -> 16). Avoid P3.6/P3.7 (USB) and P3.0/P3.1 (UART0).
 #define BOARD_NAME "Custom"
+#define BOARD_VENDOR "Custom"
 
 #define RELAY1_PIN       34
 #define RELAY2_PIN       33

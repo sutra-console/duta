@@ -11,3 +11,6 @@ static inline int digitalRead(int p){return pin_level[p];}
 static inline void analogWrite(int p,int v){pin_pwm[p]=v;}
 static inline int analogRead(int p){return p==30?512:0;}
 static inline void analogWriteResolution(int b){awres=b;}
+extern int awfreq;
+static inline void analogWriteFrequency(int f){awfreq=f;} // ESP32 core global
+static inline void analogWriteFreq(int f){awfreq=f;}       // RP2040 core global
