@@ -115,3 +115,22 @@ jobs:
           toolchains: all
       - run: west build -b ${{ matrix.board }} duta/platforms/zephyr
         working-directory: ${{ github.workspace }}
+
+  # ---- Zephyr BLE (NUS) build-check — scaffold, allowed to fail until it's
+  #      validated on hardware (BT module/API specifics may need a tweak) ----
+  zephyr-ble:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: duta
+      - uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: duta
+          manifest-file-name: west.yml
+          toolchains: all
+      - run: >
+          west build -b nrf52840dk/nrf52840 duta/platforms/zephyr
+          -- -DEXTRA_CONF_FILE=overlay-ble.conf
+        working-directory: ${{ github.workspace }}

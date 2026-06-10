@@ -35,6 +35,7 @@ small HAL (drive a pin, read a UART byte, get a tick) and a two-line main loop.
 |-----------|--------|-----------|
 | **usb-dual-cdc** | CH552 | two USB-CDC ports (raw DATA + framed CMD) |
 | **usb-mux** | ESP32(-S3/C3), Pico, Pico 2, nRF52840 | one USB-CDC, multiplexed (skrit-mux) |
+| **ble** | nRF52840 *(scaffold)* | Nordic UART Service GATT pipe, multiplexed |
 | **tcp** | host, native_sim | one socket, multiplexed |
 
 ## Build

@@ -7,19 +7,29 @@ overlay for. `native_sim` is the hardware-free CI build-check.
 
 ```sh
 west build -b native_sim platforms/zephyr               # CI build-check
-west build -b nrf52840dk/nrf52840 platforms/zephyr      # DK
+west build -b nrf52840dk/nrf52840 platforms/zephyr      # DK (USB CDC)
 west build -b nrf52840dongle/nrf52840 platforms/zephyr  # USB dongle
 west flash                                              # (DK; dongle uses nrfutil/UF2)
+
+# BLE transport instead of USB (Nordic UART Service):
+west build -b nrf52840dk/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=overlay-ble.conf
 ```
 
 (Run inside a Zephyr workspace, or point `ZEPHYR_BASE` at one.)
 
 ## Transport
 
-DATA + CMD are **multiplexed over a USB CDC ACM port** ([skrit-mux](../../protocol/PROTOCOL.md)).
-The target console is a **hardware UART** (`duta-data` devicetree alias → `uart1`). Bring
-your own board by dropping a `boards/<board>.overlay` (a `cdc_acm_uart0` node under
-`zephyr_udc0` + a `duta-data` alias) and a `boards/<board>.conf` (USB stack + CDC ACM).
+DATA + CMD are **multiplexed over one channel** ([skrit-mux](../../protocol/PROTOCOL.md)),
+selected at build time:
+
+- **USB CDC ACM** (default) — a `cdc_acm_uart0` node under `zephyr_udc0`.
+- **BLE — Nordic UART Service** (`overlay-ble.conf`, sets `CONFIG_BT`) — the same mux
+  stream over a NUS GATT pipe (RX write / TX notify). The device advertises NUS and a
+  `Duta`-prefixed name. **Scaffold** — build-checked in CI, not yet hardware-validated.
+
+The target console is a **hardware UART** (`duta-data` devicetree alias → `uart1`) in
+both. Bring your own board by dropping a `boards/<board>.overlay` (a `cdc_acm_uart0` node
+under `zephyr_udc0` + a `duta-data` alias) and a `boards/<board>.conf` (USB stack + CDC ACM).
 
 | Board | DATA UART (TX/RX) | Outputs | Reboot-to-DFU |
 |-------|-------------------|---------|---------------|
@@ -37,8 +47,8 @@ GPREGRET→DFU on nRF52) · scratch (`0xFF`) macro push-and-run via the shared s
 
 ## Roadmap
 
-- **BLE NUS transport** — carry the same mux stream over a GATT pipe (a natural fit for
-  the nRF52840); advertise alongside or instead of USB.
+- **BLE NUS transport** — *scaffolded* (`overlay-ble.conf`); needs on-hardware validation
+  (notify flow-control, MTU negotiation, pairing/bonding policy) and app-side BLE support.
 - **Dual CDC ACM** — a second `cdc_acm_uart` instance for a raw, un-muxed DATA port that
   plain terminals can open directly.
 - **Persistent macros** — back the `0x00..0xFE` ids with the settings/NVS subsystem.
