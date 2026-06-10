@@ -63,20 +63,42 @@ static skrit_dev dev;
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
 
-// Nordic UART Service (the de-facto "serial over BLE"): RX = host->device write,
-// TX = device->host notify. The skrit-mux stream rides it verbatim.
-#define NUS_SVC BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
-static struct bt_uuid_128 nus_uuid_svc = BT_UUID_INIT_128(NUS_SVC);
-static struct bt_uuid_128 nus_uuid_rx =
+// BLE is dual-channel (like dual-CDC): a Nordic UART Service carries the raw
+// DATA console (so plain BLE-UART terminals read it), and a sibling skrit CMD
+// service carries the framed CMD protocol. Not muxed.
+//   DATA = NUS:        6E40 0001 / 0002 (RX) / 0003 (TX)
+//   CMD  = skrit svc:  6E41 0001 / 0002 (RX) / 0003 (TX)  (Nordic base, 6E41)
+#define DATA_SVC BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
+#define CMD_SVC BT_UUID_128_ENCODE(0x6e410001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
+static struct bt_uuid_128 data_svc_uuid = BT_UUID_INIT_128(DATA_SVC);
+static struct bt_uuid_128 data_rx_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x6e400002, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e));
-static struct bt_uuid_128 nus_uuid_tx =
+static struct bt_uuid_128 data_tx_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x6e400003, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e));
+static struct bt_uuid_128 cmd_svc_uuid = BT_UUID_INIT_128(CMD_SVC);
+static struct bt_uuid_128 cmd_rx_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x6e410002, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e));
+static struct bt_uuid_128 cmd_tx_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x6e410003, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e));
 
 static struct bt_conn *ble_conn;
-static bool tx_subscribed;
+static bool data_subscribed, cmd_subscribed;
 
-// host -> device: feed every received byte into the mux receiver.
-static ssize_t nus_rx(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+// host -> target console: DATA-RX writes go straight to the target UART.
+static ssize_t data_rx(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                       uint16_t len, uint16_t offset, uint8_t flags) {
+  ARG_UNUSED(conn);
+  ARG_UNUSED(attr);
+  ARG_UNUSED(offset);
+  ARG_UNUSED(flags);
+  if (data_dev) {
+    const uint8_t *p = buf;
+    for (uint16_t i = 0; i < len; i++) uart_poll_out(data_dev, p[i]);
+  }
+  return len;
+}
+// host -> device CMD: CMD-RX writes feed the protocol dispatcher.
+static ssize_t cmd_rx(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                       uint16_t len, uint16_t offset, uint8_t flags) {
   ARG_UNUSED(conn);
   ARG_UNUSED(attr);
@@ -87,27 +109,38 @@ static ssize_t nus_rx(struct bt_conn *conn, const struct bt_gatt_attr *attr, con
   return len;
 }
 
-static void tx_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value) {
+static void data_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value) {
   ARG_UNUSED(attr);
-  tx_subscribed = (value == BT_GATT_CCC_NOTIFY);
+  data_subscribed = (value == BT_GATT_CCC_NOTIFY);
+}
+static void cmd_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value) {
+  ARG_UNUSED(attr);
+  cmd_subscribed = (value == BT_GATT_CCC_NOTIFY);
 }
 
-// attrs: [0]=service [1]=TX decl [2]=TX value [3]=CCC [4]=RX decl [5]=RX value.
-// We notify on the TX value attribute (attrs[2]).
-BT_GATT_SERVICE_DEFINE(nus_svc, BT_GATT_PRIMARY_SERVICE(&nus_uuid_svc),
-                       BT_GATT_CHARACTERISTIC(&nus_uuid_tx.uuid, BT_GATT_CHRC_NOTIFY,
+// attrs per service: [0]=service [1]=TX decl [2]=TX value [3]=CCC [4]=RX decl
+// [5]=RX value. We notify on the TX value attribute (attrs[2]).
+BT_GATT_SERVICE_DEFINE(data_svc, BT_GATT_PRIMARY_SERVICE(&data_svc_uuid),
+                       BT_GATT_CHARACTERISTIC(&data_tx_uuid.uuid, BT_GATT_CHRC_NOTIFY,
                                               BT_GATT_PERM_NONE, NULL, NULL, NULL),
-                       BT_GATT_CCC(tx_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-                       BT_GATT_CHARACTERISTIC(&nus_uuid_rx.uuid,
+                       BT_GATT_CCC(data_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+                       BT_GATT_CHARACTERISTIC(&data_rx_uuid.uuid,
                                               BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-                                              BT_GATT_PERM_WRITE, NULL, nus_rx, NULL));
+                                              BT_GATT_PERM_WRITE, NULL, data_rx, NULL));
+BT_GATT_SERVICE_DEFINE(cmd_svc, BT_GATT_PRIMARY_SERVICE(&cmd_svc_uuid),
+                       BT_GATT_CHARACTERISTIC(&cmd_tx_uuid.uuid, BT_GATT_CHRC_NOTIFY,
+                                              BT_GATT_PERM_NONE, NULL, NULL, NULL),
+                       BT_GATT_CCC(cmd_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+                       BT_GATT_CHARACTERISTIC(&cmd_rx_uuid.uuid,
+                                              BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                                              BT_GATT_PERM_WRITE, NULL, cmd_rx, NULL));
 
 static const struct bt_data ble_ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 static const struct bt_data ble_sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, NUS_SVC), // scan rsp: advertise the NUS UUID
+    BT_DATA_BYTES(BT_DATA_UUID128_ALL, CMD_SVC), // scan rsp: the skrit CMD UUID identifies us
 };
 
 static void ble_advertise(void) {
@@ -126,23 +159,32 @@ static void ble_disconnected(struct bt_conn *conn, uint8_t reason) {
     bt_conn_unref(ble_conn);
     ble_conn = NULL;
   }
-  tx_subscribed = false;
+  data_subscribed = cmd_subscribed = false;
   ble_advertise(); // become connectable again
 }
 BT_CONN_CB_DEFINE(ble_conn_cb) = {.connected = ble_connected, .disconnected = ble_disconnected};
 
-// device -> host: notify on TX, chunked to the negotiated ATT MTU.
-static void hal_link_write(void *c, const uint8_t *p, uint16_t n) {
-  ARG_UNUSED(c);
-  if (!ble_conn || !tx_subscribed) return;
+// notify helper, chunked to the negotiated ATT MTU.
+static void ble_notify(const struct bt_gatt_attr *tx_attr, bool subscribed, const uint8_t *p,
+                       uint16_t n) {
+  if (!ble_conn || !subscribed) return;
   uint16_t mtu = bt_gatt_get_mtu(ble_conn);
   uint16_t chunk = (mtu > 3) ? (uint16_t)(mtu - 3) : 20;
   while (n) {
     uint16_t c2 = n < chunk ? n : chunk;
-    if (bt_gatt_notify(ble_conn, &nus_svc.attrs[2], p, c2)) break; // buffers full -> drop (scaffold)
+    if (bt_gatt_notify(ble_conn, tx_attr, p, c2)) break; // buffers full -> drop (scaffold)
     p += c2;
     n -= c2;
   }
+}
+// device -> host CMD responses (link_write) and DATA console out (host_write).
+static void hal_link_write(void *c, const uint8_t *p, uint16_t n) {
+  ARG_UNUSED(c);
+  ble_notify(&cmd_svc.attrs[2], cmd_subscribed, p, n);
+}
+static void ble_data_notify(void *c, const uint8_t *p, uint16_t n) {
+  ARG_UNUSED(c);
+  ble_notify(&data_svc.attrs[2], data_subscribed, p, n);
 }
 
 static void transport_start(void) {
@@ -153,6 +195,10 @@ static void transport_start(void) {
   }
   ble_advertise();
 }
+
+#define TRANSPORT_MUXED 0           // BLE is dual-channel (NUS DATA + CMD service)
+#define TRANSPORT_CAP_MUX 0         // not muxed
+#define TRANSPORT_HOST_WRITE ble_data_notify // dual: console out is its own pipe
 
 #else // ---- USB CDC ACM transport (default) ----
 
@@ -177,6 +223,10 @@ static void transport_start(void) {
   if (usb_enable(NULL)) printk("Duta: usb_enable failed\n");
 #endif
 }
+
+#define TRANSPORT_MUXED 1                // single CDC ACM carries both channels
+#define TRANSPORT_CAP_MUX SKRIT_CAP_MUX
+#define TRANSPORT_HOST_WRITE NULL        // muxed: core wraps console onto link_write
 #endif // transport
 
 // ---- DATA console + control HAL (shared by both transports) ----------------
@@ -275,14 +325,14 @@ static void hal_pump(void *c) {
 static const skrit_hal HAL = {
     .name = "Duta nRF52840",
     .fw_ver = (FW_HI << 8) | FW_LO,
-    .caps = SKRIT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
+    .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
     .store_kb = 0,
     .n_outputs = 3,
     .n_inputs = 0,
     .link_write = hal_link_write,
     .data_write = hal_data_write,
-    .host_write = NULL,
+    .host_write = TRANSPORT_HOST_WRITE,
     .data_read = hal_data_read,
     .out_set = hal_out_set,
     .out_get = hal_out_get,
@@ -303,7 +353,7 @@ int main(void) {
   if (device_is_ready(dtr_gpio.port)) gpio_pin_configure_dt(&dtr_gpio, GPIO_OUTPUT_INACTIVE);
   if (device_is_ready(rts_gpio.port)) gpio_pin_configure_dt(&rts_gpio, GPIO_OUTPUT_INACTIVE);
 
-  skrit_dev_init(&dev, &HAL, NULL, /*muxed*/ 1);
+  skrit_dev_init(&dev, &HAL, NULL, /*muxed*/ TRANSPORT_MUXED);
   transport_start();
 
 #if defined(CONFIG_BT)

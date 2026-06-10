@@ -23,9 +23,11 @@ DATA + CMD are **multiplexed over one channel** ([skrit-mux](../../protocol/PROT
 selected at build time:
 
 - **USB CDC ACM** (default) — a `cdc_acm_uart0` node under `zephyr_udc0`.
-- **BLE — Nordic UART Service** (`overlay-ble.conf`, sets `CONFIG_BT`) — the same mux
-  stream over a NUS GATT pipe (RX write / TX notify). The device advertises NUS and a
-  `Duta`-prefixed name. **Scaffold** — build-checked in CI, not yet hardware-validated.
+- **BLE — dual-channel** (`overlay-ble.conf`, sets `CONFIG_BT`) — a Nordic UART Service
+  carries the raw DATA console (so plain BLE-UART terminals read it) and a sibling
+  **skrit CMD service** (`6E41…`) carries the framed CMD protocol. Not muxed. The device
+  advertises the CMD UUID + a `Duta`-prefixed name. **Scaffold** — build-checked in CI,
+  not yet hardware-validated.
 
 The target console is a **hardware UART** (`duta-data` devicetree alias → `uart1`) in
 both. Bring your own board by dropping a `boards/<board>.overlay` (a `cdc_acm_uart0` node
