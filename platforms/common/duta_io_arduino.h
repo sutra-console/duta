@@ -249,7 +249,11 @@ static inline uint16_t duta_io_in_get(void *ctx, uint8_t idx) {
 #ifndef DUTA_NAME_POOL
 #define DUTA_NAME_POOL 192
 #endif
+// A board with no committed pins just doesn't declare duta_board_uses[]; give a
+// harmless placeholder so the resolver loop always compiles. (DUTA_USES_N is a
+// sizeof expression on real boards — runtime-checked, not #if-able.)
 #ifndef DUTA_USES_N
+static const duta_pin_use duta_board_uses[] = {{-1, DUTA_USE_NONE, ""}};
 #define DUTA_USES_N 0
 #endif
 
@@ -290,15 +294,11 @@ static uint8_t duta__pin_broken_out(int16_t pin) {
 
 // The board-layer commitment for `pin`: DUTA_USE_NONE / FIXED / DUAL (+ label).
 static uint8_t duta__pin_use(int16_t pin, const char **what) {
-#if DUTA_USES_N > 0
-  for (uint8_t i = 0; i < DUTA_USES_N; i++)
+  for (uint8_t i = 0; i < (uint8_t)(DUTA_USES_N); i++)
     if (duta_board_uses[i].pin == pin) {
       if (what) *what = duta_board_uses[i].what;
       return duta_board_uses[i].use;
     }
-#else
-  (void)pin;
-#endif
   if (what) *what = "";
   return DUTA_USE_NONE;
 }
@@ -345,14 +345,22 @@ static uint8_t duta_io_config_get(void *ctx, uint8_t index, uint8_t *type, int16
 
 // Validate one provisioning row: the pin must be offerable, and the role must fit
 // the pin's caps. RGB is only allowed on the compiled RGB pin (FastLED is fixed).
+// A FIXED pin (e.g. the Pico's onboard GP25 LED) may be KEPT in its compiled-
+// default role — "if the LED can't move, it's always the LED" — just never
+// repurposed; pins absent from the mcu map are likewise compiled-default-only.
+static uint8_t duta__keeps_default_role(uint8_t type, int16_t pin) {
+  for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++)
+    if (duta_outputs[i].pin == pin) return duta_outputs[i].type == type;
+  return 0;
+}
 static uint8_t duta__row_ok(uint8_t type, int16_t pin) {
   // find the pin in the mcu table
   const duta_pin *mp = 0;
   for (uint8_t i = 0; i < DUTA_MCU_NPINS; i++)
     if (duta_mcu_pins[i].pin == pin) { mp = &duta_mcu_pins[i]; break; }
-  if (!mp || mp->status == DUTA_PIN_FORBIDDEN) return 0;
-  if (!duta__pin_broken_out(pin)) return 0;
-  if (duta__pin_use(pin, 0) == DUTA_USE_FIXED) return 0;
+  if (!mp || mp->status == DUTA_PIN_FORBIDDEN || !duta__pin_broken_out(pin) ||
+      duta__pin_use(pin, 0) == DUTA_USE_FIXED)
+    return duta__keeps_default_role(type, pin);
   if (type == SKRIT_CTRL_IO) return (mp->caps & DUTA_CAP_DIGITAL) ? 1 : 0;
   if (type == SKRIT_CTRL_PWM) return (mp->caps & DUTA_CAP_PWM) ? 1 : 0;
 #if DUTA_HAS_RGB

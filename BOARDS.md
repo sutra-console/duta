@@ -1,74 +1,80 @@
-# Boards — `platform → mcu → board`
+# Boards — `platform → mcu → board → target`
 
-Duta's board support is organized in three conceptual layers, because each layer
-only ever **narrows** what a pin may do — silicon sets the ceiling, the board
-carves away from it, and (with runtime provisioning) the user picks from what's
-left.
+Duta's board support is organized in four conceptual layers. The first three only
+ever **narrow** what a pin may do — silicon sets the ceiling, the board carves away
+from it — and the fourth *chooses* from what's left:
 
 | Layer | Lives in | Owns |
 |-------|----------|------|
 | **platform** | `platforms/<platform>/` | the toolchain/framework (build reality): `ch55xduino`, `espressif`, `pico`, `zephyr`, `host` |
-| **mcu** | `platforms/<platform>/src/mcu/<chip>.h` | **silicon truth**: the full pin inventory, each pin's intrinsic caps, and an immutable hazard status — written **once per chip**, reused by every board on it |
-| **board** | `platforms/<platform>/src/boards/<vendor>_<board>.h` | the physical **overlay**: vendor, the role pins, what's broken out / committed, and the compiled-default `duta_outputs[]` table |
+| **mcu** | `src/mcu/<chip>.h` | **silicon truth**: the full pin inventory, each pin's intrinsic caps, and an immutable hazard status (`FREE`/`CAUTION`/`FORBIDDEN`) — written **once per chip** |
+| **board** *(vendored)* | `src/boards/<vendor>/<board>.h` | **facts about the physical board, nothing else**: which mcu it carries, which pins are broken out, what's wired onboard (`FIXED`/`DUAL` uses), `BOARD_VENDOR` + `BOARD_MODEL` |
+| **target** *(ours)* | `src/targets/duta_<board>.h` | **our choices**: which vendored board we build on, the Duta role pins (DATA UART, relays, LED, RGB, DTR/RTS), `BOARD_NAME`, and the compiled-default `duta_outputs[]` |
+
+The split matters: *"relay on GPIO4" is not a fact about a DevKitC — it's a fact
+about our wiring.* Vendored board headers must stay accurate to the actual product
+(breakout, onboard LED/WS2812, nothing more), so they're reusable by anyone; the
+Duta-specific role map lives in the target that `#include`s one of them. To bring up
+your own build, **base a new target off a vendored board** (or vendor a new board
+first if yours isn't here).
 
 `board.h` in each platform is a **thin dispatcher**: it maps the `-DBOARD_*` build
-flag (set per env in `platformio.ini`) to the matching leaf header.
-
-Vendor is a **field** (`BOARD_VENDOR`) and a **filename prefix**, not a directory
-level (PlatformIO's convention). Promote to `boards/<vendor>/…` only if one vendor
-ever accumulates many boards.
+flag (set per env in `platformio.ini`) to a target.
 
 ## The layers in code
 
 - **`platforms/common/duta_pincap.h`** — the shared vocabulary: capability bits
-  (`DUTA_CAP_DIGITAL/ADC/PWM/DAC/I2C/SPI/TOUCH`), the mcu hazard status
-  (`FREE`/`CAUTION`/`FORBIDDEN`), and the board commitment (`FIXED`/`DUAL`). This
-  is the "menu" runtime provisioning picks from.
+  (`DUTA_CAP_DIGITAL/ADC/PWM/DAC/I2C/SPI/TOUCH`), the mcu hazard status, and the
+  board commitment (`FIXED`/`DUAL`). This is the "menu" runtime provisioning picks from.
 - **`mcu/<chip>.h`** — declares `static const duta_pin duta_mcu_pins[]` (+ `DUTA_MCU_NPINS`,
   `DUTA_MCU_NAME`, `BOARD_HAS_NATIVE_USB`). One row per pin: `{pin, caps, status, bus}`.
-- **`boards/<vendor>_<board>.h`** — `#include "../mcu/<chip>.h"`, then declares
-  `BOARD_NAME`, `BOARD_VENDOR`, the role pins, the board overlay (below), and pulls
-  in `duta_board_io.h` to build the default output table.
-- **`platforms/common/duta_board_io.h`** — builds the standard `duta_outputs[]`
-  (two IO relays + a PWM aux LED + an optional RGB row) from the role macros, so a
-  board header declares pins, not table boilerplate. A board with a non-standard IO
-  set can declare `duta_outputs[]` itself instead.
+- **`boards/<vendor>/<board>.h`** — `#include "../../mcu/<chip>.h"`, then the facts:
 
-### The board overlay (what's physically true on *this* product)
+  ```c
+  #define BOARD_VENDOR "Raspberry Pi"
+  #define BOARD_MODEL "Pico"
+  // breakout: DUTA_BROKEN_OUT_ALL 1 (dev kits) or an explicit pin list
+  static const int16_t duta_board_broken_out[] = { 0, 1, /* … */ };
+  #define DUTA_BROKEN_OUT_N (sizeof … )
+  // onboard hardware:
+  #define ONBOARD_LED_PIN 25
+  static const duta_pin_use duta_board_uses[] = {
+      {25, DUTA_USE_FIXED, "onboard LED"},   // not on a header -> never provisionable
+      {48, DUTA_USE_DUAL,  "onboard WS2812"},// on a header too -> offered with a warning
+  };
+  #define DUTA_USES_N (sizeof … )
+  ```
 
-```c
-// every usable header pin is exposed (dev kits): the resolver still filters
-// FORBIDDEN (flash/USB) and FIXED uses out of the menu.
-#define DUTA_BROKEN_OUT_ALL 1
-// …or an explicit list for a product board:
-static const int16_t duta_board_broken_out[] = { 0, 1, 2, /* … */ };
-#define DUTA_BROKEN_OUT_N  (sizeof duta_board_broken_out / sizeof duta_board_broken_out[0])
+- **`targets/duta_<board>.h`** — `#include "../boards/<vendor>/<board>.h"`, then our
+  role pins (`DATA_TX/RX`, `RELAY1/2`, `LED`, `RGB`, `DTR/RTS`) + `BOARD_NAME`, ending
+  with `#include "duta_board_io.h"` to build the default `duta_outputs[]` table. A
+  target with a non-standard IO set declares `duta_outputs[]` itself instead.
 
-// pins wired to onboard hardware:
-static const duta_pin_use duta_board_uses[] = {
-    {25, DUTA_USE_FIXED, "onboard LED"},   // not broken out -> LED is a constant, never offered
-    {48, DUTA_USE_DUAL,  "onboard WS2812"},// broken out AND onboard -> offered, but warned
-};
-#define DUTA_USES_N (sizeof duta_board_uses / sizeof duta_board_uses[0])
-```
+## Provisioning semantics (mcu ∩ board)
 
-A pin is provisionable iff **`broken_out && committed != FIXED`**. The device
-resolves `mcu ∩ board` and reports it over `PIN_CAPS`, so the app's "Configure
-device" picker renders the menu with **zero hardcoded chip knowledge**.
+A pin is **offerable** iff it's broken out, not `FORBIDDEN`, and not `FIXED`. The
+device resolves this and reports it over `PIN_CAPS`, so the app's "Configure device"
+picker renders the menu with **zero hardcoded chip knowledge**. Two special rules:
 
-## Adding a board
+- **dual-use** pins (Arduino-D13-style: on a header *and* driving onboard hardware)
+  are offered with a warning naming what they'd take over.
+- **fixed** pins may be *kept* in their compiled-default role by a provisioned table
+  (the Pico's GP25 stays the LED — "if the LED can't move, it's always the LED"),
+  but never repurposed or moved.
 
-1. If the chip is new, write `mcu/<chip>.h` (the silicon truth — do it once).
-2. Copy a sibling `boards/<vendor>_<board>.h`, set `BOARD_NAME` / `BOARD_VENDOR`,
-   the role pins, and the broken-out/committed overlay.
-3. Add a `#elif defined(BOARD_<X>)` arm to that platform's `board.h` dispatcher.
-4. Add an `[env:<x>]` to `platformio.ini` passing `-DBOARD_<X>`.
+## Adding a board / target
 
-That's the whole PR — one leaf header (and a one-time mcu map for a new chip).
+1. If the chip is new, write `mcu/<chip>.h` (the silicon truth — once per chip).
+2. If the physical board is new, vendor it: `boards/<vendor>/<board>.h` (facts only).
+3. Create `targets/duta_<board>.h` basing off the vendored board with your role pins.
+4. Add a `#elif defined(BOARD_<X>)` arm to that platform's `board.h` dispatcher and an
+   `[env:<x>]` to `platformio.ini` passing `-DBOARD_<X>`.
+
+Steps 1–2 are upstreamable facts anyone can reuse; step 3 is the only Duta opinion.
 
 ## Zephyr is native
 
 Zephyr has its own board concept, so the nRF platform stays on Zephyr's mechanism:
 `platforms/zephyr/boards/<target>.conf` + `.overlay`, named in Zephyr's canonical
-`<vendor>_<board>` style (e.g. `nrf52840dk_nrf52840`). IO there is driven from the
-devicetree, not the `duta_io` table.
+style (e.g. `nrf52840dk_nrf52840`). IO there is driven from the devicetree, not the
+`duta_io` table.
