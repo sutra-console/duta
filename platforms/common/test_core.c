@@ -21,9 +21,16 @@ static void m_odesc(void*c,uint8_t i,uint8_t*t,const char**n){(void)c;(void)i;*t
 static uint16_t pwm[4];
 static uint8_t m_pwmset(void*c,uint8_t i,uint16_t d){(void)c;if(i!=2)return 0;pwm[i]=d;return 1;} // only idx 2 PWMs
 static uint16_t m_pwmget(void*c,uint8_t i){(void)c;return pwm[i];}
-static uint8_t rgb[3]; // last color set on the rgb output (idx 2 in this mock)
-static uint8_t m_rgbset(void*c,uint8_t i,uint8_t r,uint8_t g,uint8_t b){(void)c;if(i!=2)return 0;rgb[0]=r;rgb[1]=g;rgb[2]=b;return 1;}
-static void m_rgbget(void*c,uint8_t i,uint8_t*r,uint8_t*g,uint8_t*b){(void)c;(void)i;*r=rgb[0];*g=rgb[1];*b=rgb[2];}
+#define RGB_N 3 // mock rgb output (idx 2) has a 3-pixel strip
+static uint8_t rgb[RGB_N][3];
+static uint8_t m_rgbcount(void*c,uint8_t i){(void)c;return i==2?RGB_N:0;}
+static uint8_t m_rgbset(void*c,uint8_t i,uint8_t px,uint8_t r,uint8_t g,uint8_t b){
+  (void)c; if(i!=2)return 0;
+  if(px==SKRIT_RGB_ALL){for(int p=0;p<RGB_N;p++){rgb[p][0]=r;rgb[p][1]=g;rgb[p][2]=b;}return 1;}
+  if(px>=RGB_N)return 0;
+  rgb[px][0]=r;rgb[px][1]=g;rgb[px][2]=b;return 1;}
+static void m_rgbget(void*c,uint8_t i,uint8_t px,uint8_t*r,uint8_t*g,uint8_t*b){
+  (void)c;(void)i; if(px>=RGB_N)px=0; *r=rgb[px][0];*g=rgb[px][1];*b=rgb[px][2];}
 static uint32_t m_millis(void*c){(void)c;return fake_ms++;} // advances so waits terminate
 
 static skrit_hal hal = {0};
@@ -55,7 +62,7 @@ int main(void){
   hal.link_write=m_link;hal.data_write=m_data;hal.data_read=m_read;
   hal.out_set=m_oset;hal.out_get=m_oget;hal.out_desc=m_odesc;hal.millis=m_millis;
   hal.pwm_set=m_pwmset;hal.pwm_get=m_pwmget;
-  hal.rgb_set=m_rgbset;hal.rgb_get=m_rgbget;
+  hal.rgb_count=m_rgbcount;hal.rgb_set=m_rgbset;hal.rgb_get=m_rgbget;
 
   // ---- MUX: PING ----
   skrit_dev_init(&dev,&hal,NULL,1);
@@ -132,27 +139,32 @@ int main(void){
     assert(r[3]==SKRIT_ST_OK && pwm[2]==1023); }
   printf("macro SETPWM ok\n");
 
-  // ---- OUT_RGB: set a color, read it back, reject a relay ----
-  { uint8_t sc[4]={2, 0x12, 0x34, 0x56};
-    link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,17,sc,4,1); rn=last_resp(r,1);
-    assert(r[3]==SKRIT_ST_OK && r[4]==2 && r[5]==0x12 && r[6]==0x34 && r[7]==0x56);
-    assert(rgb[0]==0x12 && rgb[1]==0x34 && rgb[2]==0x56);
-    uint8_t gc[1]={2}; link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,18,gc,1,1); rn=last_resp(r,1);
-    assert(r[3]==SKRIT_ST_OK && r[5]==0x12 && r[6]==0x34 && r[7]==0x56);
-    uint8_t badc[4]={0, 1, 2, 3}; link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,19,badc,4,1); rn=last_resp(r,1);
-    assert(r[3]==SKRIT_ST_BADARGS); }
-  printf("OUT_RGB set/get/reject ok\n");
+  // ---- OUT_RGB: fill all, read back (with count), set one pixel, reject relay ----
+  { uint8_t fill[4]={2, 0x12, 0x34, 0x56}; // len 4 = fill all pixels
+    link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,17,fill,4,1); rn=last_resp(r,1);
+    // resp: status,index,count,r,g,b
+    assert(r[3]==SKRIT_ST_OK && r[4]==2 && r[5]==RGB_N && r[6]==0x12 && r[7]==0x34 && r[8]==0x56);
+    assert(rgb[0][0]==0x12 && rgb[1][0]==0x12 && rgb[2][0]==0x12); // all filled
+    uint8_t setpx[5]={2, 1, 0xAA, 0xBB, 0xCC}; // len 5 = set pixel 1
+    link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,18,setpx,5,1); rn=last_resp(r,1);
+    assert(r[3]==SKRIT_ST_OK && rgb[1][0]==0xAA && rgb[1][1]==0xBB && rgb[1][2]==0xCC);
+    assert(rgb[0][0]==0x12); // pixel 0 untouched
+    uint8_t gc[1]={2}; link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,19,gc,1,1); rn=last_resp(r,1);
+    assert(r[3]==SKRIT_ST_OK && r[5]==RGB_N && r[6]==0x12); // read = count + pixel 0
+    uint8_t badc[4]={0, 1, 2, 3}; link_n=0; feed_cmd(&dev,SKRIT_OUT_RGB,20,badc,4,1); rn=last_resp(r,1);
+    assert(r[3]==SKRIT_ST_BADARGS); } // relay isn't rgb
+  printf("OUT_RGB fill/setpx/read/reject ok\n");
 
-  // ---- scratch macro with SETRGB opcode ----
-  { uint8_t prog3[]={SKRIT_MC_VER, SKRIT_MC_SETRGB,2,0xAA,0xBB,0xCC, SKRIT_MC_END};
+  // ---- scratch macro with SETRGB opcode (fills the strip) ----
+  { uint8_t prog3[]={SKRIT_MC_VER, SKRIT_MC_SETRGB,2,0x01,0x02,0x03, SKRIT_MC_END};
     uint8_t beg3[3]={SKRIT_MC_SCRATCH,(uint8_t)sizeof prog3,0};
-    feed_cmd(&dev,SKRIT_MACRO_WRITE_BEGIN,20,beg3,3,1);
+    feed_cmd(&dev,SKRIT_MACRO_WRITE_BEGIN,21,beg3,3,1);
     uint8_t wd3[3+sizeof prog3]; wd3[0]=SKRIT_MC_SCRATCH;wd3[1]=0;wd3[2]=0;memcpy(wd3+3,prog3,sizeof prog3);
-    feed_cmd(&dev,SKRIT_MACRO_WRITE_DATA,21,wd3,3+sizeof prog3,1);
-    uint8_t en5[1]={SKRIT_MC_SCRATCH}; feed_cmd(&dev,SKRIT_MACRO_WRITE_END,22,en5,1,1);
-    rgb[0]=rgb[1]=rgb[2]=0; uint8_t run3[1]={SKRIT_MC_SCRATCH};
-    link_n=0; feed_cmd(&dev,SKRIT_MACRO_RUN,23,run3,1,1); rn=last_resp(r,1);
-    assert(r[3]==SKRIT_ST_OK && rgb[0]==0xAA && rgb[1]==0xBB && rgb[2]==0xCC); }
+    feed_cmd(&dev,SKRIT_MACRO_WRITE_DATA,22,wd3,3+sizeof prog3,1);
+    uint8_t en5[1]={SKRIT_MC_SCRATCH}; feed_cmd(&dev,SKRIT_MACRO_WRITE_END,23,en5,1,1);
+    memset(rgb,0,sizeof rgb); uint8_t run3[1]={SKRIT_MC_SCRATCH};
+    link_n=0; feed_cmd(&dev,SKRIT_MACRO_RUN,24,run3,1,1); rn=last_resp(r,1);
+    assert(r[3]==SKRIT_ST_OK && rgb[0][0]==0x01 && rgb[2][2]==0x03); } // whole strip filled
   printf("macro SETRGB ok\n");
 
   // ---- DUAL link: PING is a bare COBS frame (no channel tag) ----

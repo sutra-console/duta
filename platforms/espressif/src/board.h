@@ -15,8 +15,9 @@
 #define BOARD_ESP32S3
 #endif
 
-// RGB_PIN: an onboard WS2812/NeoPixel data pin (-1 = none). When set, the board
-// exposes a 4th output (index 3) of type rgb, driven via Arduino neopixelWrite().
+// RGB_PIN: a WS2812/NeoPixel data pin (-1 = none). When set, the board exposes a
+// 4th output (index 3) of type rgb, driven via FastLED. RGB_COUNT is the strip
+// length — 1 for the onboard pixel; bump it (and repoint RGB_PIN) for a strip.
 
 #if defined(BOARD_ESP32S3)
 #define BOARD_NAME "Duta ESP32-S3"
@@ -57,6 +58,9 @@
 
 #ifndef RGB_PIN
 #define RGB_PIN (-1)
+#endif
+#ifndef RGB_COUNT
+#define RGB_COUNT 1 // onboard pixel; raise for an external strip on RGB_PIN
 #endif
 
 #ifndef RELAY_ACTIVE_LOW

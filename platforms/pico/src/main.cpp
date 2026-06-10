@@ -152,7 +152,7 @@ static const skrit_hal HAL = {
     hal_link_write, hal_data_write, /*host_write*/ nullptr, hal_data_read,
     hal_out_set, hal_out_get, hal_out_desc,
     hal_pwm_set, hal_pwm_get,
-    /*rgb_set*/ nullptr, /*rgb_get*/ nullptr, // no onboard addressable LED
+    /*rgb_count*/ nullptr, /*rgb_set*/ nullptr, /*rgb_get*/ nullptr, // no addressable LED
     /*in_desc*/ nullptr, /*in_get*/ nullptr,
     hal_serial_get, hal_serial_set, hal_serial_signal,
     hal_reboot,

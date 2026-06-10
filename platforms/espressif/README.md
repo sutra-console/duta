@@ -30,7 +30,7 @@ auto-reset lines (`-1` = unused).
 ## What it answers
 
 `PING` · `INFO` (caps = mux + serial + reboot + pwm, `macro_tier = 2`) · `DEVICE_NAME` ·
-`OUTPUT_SET/GET/TOGGLE/DESC/PULSE/PWM/RGB` (Aux LED dims 0–1023; onboard NeoPixel as an RGB output) · `SERIAL_GET/SET/SIGNAL` (set DATA baud/parity,
+`OUTPUT_SET/GET/TOGGLE/DESC/PULSE/PWM/RGB` (Aux LED dims 0–1023; the onboard WS2812 is an addressable RGB output via FastLED — per-pixel, raise `RGB_COUNT` for a strip) · `SERIAL_GET/SET/SIGNAL` (set DATA baud/parity,
 drive DTR/RTS/BREAK to enter ESP/AVR bootloaders) · `REBOOT` (app, or download/DFU on
 S3/C3) · `MACRO_WRITE_*`/`MACRO_RUN` for scratch (`0xFF`) push-and-run.
 

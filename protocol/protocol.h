@@ -35,7 +35,8 @@ enum {
   SKRIT_SERIAL_SET = 0x18, // baud(4), data_bits(1), parity(1), stop_bits(1)
   SKRIT_SERIAL_SIGNAL = 0x19, // mask(1), value(1): drive DATA modem/break lines (see SKRIT_SIG_*)
   SKRIT_OUT_PWM = 0x1A, // index(1)[, duty(2)]: with duty = set PWM 0..1023; without = read back duty(2)
-  SKRIT_OUT_RGB = 0x1B, // index(1)[, r(1), g(1), b(1)]: with rgb = set color; without = read back r,g,b
+  SKRIT_OUT_RGB = 0x1B, // index(1)[, [pixel(1),] r(1), g(1), b(1)] -> index, count(1), r, g, b
+                        //   len 1 = read; len 4 = set all pixels; len 5 = set one pixel
   SKRIT_MACRO_LIST = 0x20,
   SKRIT_MACRO_META = 0x21,
   SKRIT_MACRO_READ = 0x22,
@@ -120,7 +121,7 @@ enum {                        // opcodes (low nibble groups by tier)
   SKRIT_MC_DELAY = 0x02,      // ms(2)                                    [tier 1]
   SKRIT_MC_SETOUT = 0x03,     // index(1), val(1)                         [tier 1]
   SKRIT_MC_SETPWM = 0x04,     // index(1), duty(2) 0..1023                [tier 1]
-  SKRIT_MC_SETRGB = 0x05,     // index(1), r(1), g(1), b(1)               [tier 1]
+  SKRIT_MC_SETRGB = 0x05,     // index(1), r(1), g(1), b(1) -> fill all   [tier 1]
   SKRIT_MC_EXPECT = 0x10,     // timeout(2), n(1), bytes[n] -> outcome    [tier 2]
   SKRIT_MC_WAITIO = 0x11,     // index(1), cmp(1), val(2), timeout(2)     [tier 2]
   SKRIT_MC_WAITOK = 0x12,     // halt FAIL if last outcome is FAIL        [tier 2]
@@ -143,6 +144,8 @@ enum {
   SKRIT_CTRL_RELAY = 0, SKRIT_CTRL_LED = 1, SKRIT_CTRL_BUTTON = 2,
   SKRIT_CTRL_PWM = 3, SKRIT_CTRL_RGB = 4,
 };
+// OUT_RGB pixel sentinel: address the whole strip (fill all pixels).
+#define SKRIT_RGB_ALL 0xFF
 
 // ---- input types (INPUT_DESC body[2]) ----
 enum { SKRIT_IN_DIGITAL = 0, SKRIT_IN_ANALOG = 1 };

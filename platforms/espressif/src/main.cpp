@@ -18,6 +18,10 @@
 #include <Arduino.h>
 
 #include "board.h"
+#if RGB_PIN >= 0
+#define FASTLED_INTERNAL // silence the FastLED version banner
+#include <FastLED.h>
+#endif
 extern "C" {
 #include "skrit_device.h"
 }
@@ -45,23 +49,34 @@ static const char *const OUT_NAME[4] = {"Relay 1", "Relay 2", "Aux LED", "RGB LE
 static const uint8_t OUT_TYPE[4] = {SKRIT_CTRL_RELAY, SKRIT_CTRL_RELAY, SKRIT_CTRL_PWM, SKRIT_CTRL_RGB};
 static const int8_t OUT_PIN[4] = {RELAY1_PIN, RELAY2_PIN, LED_PIN, RGB_PIN};
 static uint16_t g_pwm[4]; // duty 0..1023 (the Aux LED channel)
-static uint8_t g_rgb[3];  // last RGB color (the RGB LED channel)
+
+#if RGB_PIN >= 0
+static CRGB g_leds[RGB_COUNT]; // the addressable strip, driven by FastLED
+#endif
 
 static skrit_dev dev;
 
-static void applyRgb(uint8_t r, uint8_t g, uint8_t b) {
+// Set pixel `px` (or SKRIT_RGB_ALL to fill) and push to the strip. Tracks the
+// output's on/off state for the bitmap (lit = any pixel non-black).
+static void applyRgb(uint8_t px, uint8_t r, uint8_t g, uint8_t b) {
 #if RGB_PIN >= 0
-  g_rgb[0] = r; g_rgb[1] = g; g_rgb[2] = b;
-  g_out[RGB_IDX] = (r | g | b) ? 1 : 0;
-  neopixelWrite(RGB_PIN, r, g, b); // built into the ESP32 Arduino core
+  if (px == SKRIT_RGB_ALL) {
+    for (int i = 0; i < RGB_COUNT; i++) g_leds[i] = CRGB(r, g, b);
+  } else if (px < RGB_COUNT) {
+    g_leds[px] = CRGB(r, g, b);
+  }
+  FastLED.show();
+  uint8_t lit = 0;
+  for (int i = 0; i < RGB_COUNT; i++) lit |= g_leds[i].r | g_leds[i].g | g_leds[i].b;
+  g_out[RGB_IDX] = lit ? 1 : 0;
 #else
-  (void)r; (void)g; (void)b;
+  (void)px; (void)r; (void)g; (void)b;
 #endif
 }
 
 // ---- helpers ---------------------------------------------------------------
 static void applyOut(uint8_t idx, uint8_t on) {
-  if (idx == RGB_IDX) { applyRgb(on ? 64 : 0, on ? 64 : 0, on ? 64 : 0); return; }
+  if (idx == RGB_IDX) { applyRgb(SKRIT_RGB_ALL, on ? 64 : 0, on ? 64 : 0, on ? 64 : 0); return; }
   if (idx > 2) return;
   g_out[idx] = on ? 1 : 0;
   g_pwm[idx] = on ? 1023 : 0; // a plain set snaps the duty to the rails
@@ -114,15 +129,24 @@ static uint8_t hal_pwm_set(void *, uint8_t idx, uint16_t duty) {
 }
 static uint16_t hal_pwm_get(void *, uint8_t idx) { return idx < 4 ? g_pwm[idx] : 0; }
 
-// RGB via the ESP32 core's neopixelWrite() on the onboard WS2812.
-static uint8_t hal_rgb_set(void *, uint8_t idx, uint8_t r, uint8_t g, uint8_t b) {
+// RGB via FastLED on the WS2812 strip (onboard pixel by default).
+static uint8_t hal_rgb_count(void *, uint8_t idx) {
+  return (idx == RGB_IDX && RGB_PIN >= 0) ? RGB_COUNT : 0;
+}
+static uint8_t hal_rgb_set(void *, uint8_t idx, uint8_t px, uint8_t r, uint8_t g, uint8_t b) {
   if (idx != RGB_IDX || RGB_PIN < 0) return 0;
-  applyRgb(r, g, b);
+  if (px != SKRIT_RGB_ALL && px >= RGB_COUNT) return 0;
+  applyRgb(px, r, g, b);
   return 1;
 }
-static void hal_rgb_get(void *, uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b) {
+static void hal_rgb_get(void *, uint8_t idx, uint8_t px, uint8_t *r, uint8_t *g, uint8_t *b) {
   (void)idx;
-  *r = g_rgb[0]; *g = g_rgb[1]; *b = g_rgb[2];
+#if RGB_PIN >= 0
+  if (px >= RGB_COUNT) px = 0;
+  *r = g_leds[px].r; *g = g_leds[px].g; *b = g_leds[px].b;
+#else
+  (void)px; *r = *g = *b = 0;
+#endif
 }
 
 static void hal_serial_get(void *, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop) {
@@ -183,7 +207,7 @@ static const skrit_hal HAL = {
     hal_link_write, hal_data_write, /*host_write*/ nullptr, hal_data_read,
     hal_out_set, hal_out_get, hal_out_desc,
     hal_pwm_set, hal_pwm_get,
-    hal_rgb_set, hal_rgb_get,
+    hal_rgb_count, hal_rgb_set, hal_rgb_get,
     /*in_desc*/ nullptr, /*in_get*/ nullptr,
     hal_serial_get, hal_serial_set, hal_serial_signal,
     hal_reboot,
@@ -196,7 +220,11 @@ void setup() {
     pinMode(OUT_PIN[i], OUTPUT);
     applyOut(i, 0);
   }
-  if (RGB_PIN >= 0) applyRgb(0, 0, 0); // NeoPixel: neopixelWrite owns the pin
+#if RGB_PIN >= 0
+  FastLED.addLeds<WS2812, RGB_PIN, GRB>(g_leds, RGB_COUNT);
+  FastLED.setBrightness(255);
+  applyRgb(SKRIT_RGB_ALL, 0, 0, 0); // start dark
+#endif
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
 

@@ -87,10 +87,14 @@ typedef struct skrit_hal {
   uint8_t (*pwm_set)(void *ctx, uint8_t idx, uint16_t duty);
   uint16_t (*pwm_get)(void *ctx, uint8_t idx);
 
-  // RGB / addressable LED (NULL unless an rgb-type output exists). rgb_set
-  // returns 0 if the output isn't RGB (-> BADARGS); rgb_get reads it back.
-  uint8_t (*rgb_set)(void *ctx, uint8_t idx, uint8_t r, uint8_t g, uint8_t b);
-  void (*rgb_get)(void *ctx, uint8_t idx, uint8_t *r, uint8_t *g, uint8_t *b);
+  // RGB / addressable LED (NULL unless an rgb-type output exists).
+  //   rgb_count: pixels in output `idx` (0 = not an RGB output).
+  //   rgb_set:   set pixel `px` to r,g,b; px == SKRIT_RGB_ALL fills the strip.
+  //              returns 0 if `idx` isn't RGB or `px` is out of range.
+  //   rgb_get:   read pixel `px`'s color (clamped to the strip).
+  uint8_t (*rgb_count)(void *ctx, uint8_t idx);
+  uint8_t (*rgb_set)(void *ctx, uint8_t idx, uint8_t px, uint8_t r, uint8_t g, uint8_t b);
+  void (*rgb_get)(void *ctx, uint8_t idx, uint8_t px, uint8_t *r, uint8_t *g, uint8_t *b);
 
   // Inputs (NULL if n_inputs == 0). in_get: digital 0/1, analog 0..1023.
   void (*in_desc)(void *ctx, uint8_t idx, uint8_t *type, const char **name);
@@ -297,7 +301,8 @@ static uint8_t skrit__run_program(skrit_dev *d, const uint8_t *prog, uint16_t le
       uint8_t idx = prog[pc];
       uint8_t rr = prog[pc + 1], gg = prog[pc + 2], bb = prog[pc + 3];
       pc += 4;
-      if (d->hal->rgb_set && idx < d->hal->n_outputs) d->hal->rgb_set(d->ctx, idx, rr, gg, bb);
+      if (d->hal->rgb_set && idx < d->hal->n_outputs)
+        d->hal->rgb_set(d->ctx, idx, SKRIT_RGB_ALL, rr, gg, bb); // fill the strip
       break; // no RGB output -> silently no-op
     }
     case SKRIT_MC_EXPECT: {
@@ -511,17 +516,24 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     break;
   }
   case SKRIT_OUT_RGB: {
-    // len 1 = read back color; len >= 4 = set color (r, g, b)
-    if (!h->rgb_set || !h->rgb_get) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
-    if (len < 1 || b[0] >= h->n_outputs) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
-    if (len >= 4 && !h->rgb_set(d->ctx, b[0], b[1], b[2], b[3])) {
-      skrit__status(d, type, seq, SKRIT_ST_BADARGS);
+    // len 1 = read; len 4 = set all pixels (r,g,b); len 5 = set one (pixel,r,g,b)
+    if (!h->rgb_set || !h->rgb_get || !h->rgb_count) {
+      skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED);
       break;
     }
+    if (len < 1 || b[0] >= h->n_outputs) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    uint8_t count = h->rgb_count(d->ctx, b[0]);
+    if (count == 0) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; } // not an RGB output
+    uint8_t ok = 1;
+    if (len >= 5) ok = h->rgb_set(d->ctx, b[0], b[1], b[2], b[3], b[4]); // one pixel
+    else if (len >= 4) ok = h->rgb_set(d->ctx, b[0], SKRIT_RGB_ALL, b[1], b[2], b[3]); // fill
+    else if (len != 1) ok = 0; // 2 or 3 bytes is malformed
+    if (!ok) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
     uint8_t rr = 0, gg = 0, bb = 0;
-    h->rgb_get(d->ctx, b[0], &rr, &gg, &bb);
+    h->rgb_get(d->ctx, b[0], 0, &rr, &gg, &bb); // pixel 0's color
     body[bl++] = SKRIT_ST_OK;
     body[bl++] = b[0];
+    body[bl++] = count;
     body[bl++] = rr;
     body[bl++] = gg;
     body[bl++] = bb;
