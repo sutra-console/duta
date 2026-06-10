@@ -23,6 +23,11 @@ targets:
     transport: usb-mux
 
   - platform: espressif
+    board: waveshare-esp32-s3-zero
+    env: s3zero
+    transport: usb-mux
+
+  - platform: espressif
     board: esp32-c3-devkitm-1
     env: esp32c3
     transport: usb-mux

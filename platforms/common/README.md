@@ -18,13 +18,17 @@ while (cmd_has_byte()) skrit_dev_rx(&dev, cmd_next());
 A platform sets `hal.caps` (incl. `SKRIT_CAP_MUX` iff it constructed the device muxed),
 `hal.macro_tier` (0 = no VM, 2 = full interactive), and wires the callbacks it supports
 — a `NULL` callback degrades to a clean `unsupported`/`bad args` reply, never a crash.
+New HAL fields are always **appended** (positional initializers zero-fill trailing
+fields), so older platform code keeps compiling.
 
 ## Table-driven IO (Arduino platforms)
 
 The Arduino ports (espressif, pico) don't hand-write the IO callbacks: a board declares
-its outputs/inputs as a table of [`duta_io`](duta_io.h) descriptors, and
-[`duta_io_arduino.h`](duta_io_arduino.h) *is* the `skrit_hal` IO callbacks
-(`out_*`, `pwm_*`, `rgb_*`, `in_*`) driving that table. Adding a relay is one row:
+its outputs/inputs as a table of [`duta_io`](duta_io.h) descriptors —
+[`duta_board_io.h`](duta_board_io.h) builds the standard table from a target's role
+macros — and [`duta_io_arduino.h`](duta_io_arduino.h) *is* the `skrit_hal` IO callbacks
+(`out_*`, `pwm_*` incl. `pwm_config_*`, `rgb_*`, `in_*`) driving that table. Adding a
+relay is one row:
 
 ```c
 static const duta_io duta_outputs[] = {
@@ -37,26 +41,55 @@ static const duta_io duta_outputs[] = {
 `main.cpp` then only wires transport/serial/reboot and points the HAL's IO fields at
 `duta_io_*`. Zephyr drives IO from its devicetree instead (already a declarative table).
 
+## Runtime provisioning (`DUTA_PROVISION`)
+
+The driver operates on an *active table* pointer that defaults to the compiled
+`duta_outputs[]`. Defining `DUTA_PROVISION` (before including the driver) adds the
+runtime layer on top of the [`duta_pincap.h`](duta_pincap.h) vocabulary and the board's
+mcu/overlay tables (see [../../BOARDS.md](../../BOARDS.md)):
+
+- `duta_io_pin_caps` — resolves the offerable-pin **menu** (`mcu ∩ board`): hides
+  forbidden/fixed pins, warns on strapping/dual-use ones.
+- `duta_io_config_get` / `duta_io_config_set` — read the current table / validate a new
+  one against the menu and persist it. A **fixed** pin may be *kept* in its compiled
+  role (the Pico's onboard LED stays the LED) but never repurposed.
+- `duta_io_load` — at boot, swaps in the persisted table; else the compiled default.
+- Persistence is three hooks (`duta_io_store_load/save/clear`); a platform defines
+  `DUTA_HAVE_STORE` + real storage (ESP32 → NVS via `Preferences`). Without it, a RAM
+  buffer makes provisioning session-only.
+
+Point the trailing HAL fields (`pin_caps`, `config_get`, `config_set`) at these and the
+core advertises `SKRIT_FLAG_PROVISION` + answers `PIN_CAPS`/`CONFIG_GET`/`CONFIG_SET`.
+
 ## What's implemented here vs. per-platform
 
 | In the core (free for every port) | Left to the platform HAL |
 |-----------------------------------|--------------------------|
-| COBS/CRC framing, mux demux/remux | byte in/out on USB/UART/TCP/BLE |
-| `PING`/`INFO`/`DEVICE_NAME`/`REBOOT` | GPIO for outputs/inputs |
-| `OUTPUT_*` / `INPUT_*` / `OUTPUT_PULSE` | UART config + DTR/RTS/BREAK lines |
+| COBS/CRC framing, mux demux/remux | byte in/out on USB/UART/WS/BLE |
+| `PING`/`INFO`/`DEVICE_NAME`/`REBOOT`/`DATA_DESC` | GPIO for outputs/inputs |
+| `OUTPUT_*` / `INPUT_*` / `OUTPUT_PULSE` / `PWM_CONFIG` | UART config + DTR/RTS/BREAK lines |
 | `SERIAL_GET/SET/SIGNAL` plumbing | `millis()` + a `pump()` for waits |
+| `AUTH` session gating (network transports) | password storage |
+| `PIN_CAPS` / `CONFIG_GET` / `CONFIG_SET` dispatch | the pin menu + table persistence |
 | skrit-mc VM + scratch (`0xFF`) push-and-run | persistent macro storage (optional) |
 | ASCII hand-terminal mode (dual links) | board pin map |
 
 Persistent macro slots (ids `0x00..0xFE`) currently reply `STORAGE`; scratch push-and-run
 works everywhere. A platform with flash can add a storage hook later (see the roadmap).
 
-## Test
+## Tests (the hardware-free CI checks)
 
-[`test_core.c`](test_core.c) drives the core with a mock HAL — framing (dual + mux),
-INFO/outputs, DATA passthrough both ways, a scratch macro run, and CRC rejection. It is
-the hardware-free CI check:
+- [`test_core.c`](test_core.c) — the core with a mock HAL: framing (dual + mux),
+  INFO/outputs, DATA passthrough, PWM + PWM_CONFIG, RGB, DATA_DESC, AUTH gating,
+  provisioning dispatch, scratch macro runs, CRC rejection.
+- [`test/test_io.cpp`](test/test_io.cpp) — the table-driven Arduino IO driver against a
+  mock `Arduino.h`.
+- [`test/test_provision.cpp`](test/test_provision.cpp) — the provisioning resolver,
+  validated writes (incl. the fixed-pin keep/repurpose rule), and the persistence
+  round-trip.
 
 ```sh
-cc -std=c11 -I . -I ../../protocol test_core.c -o test_core && ./test_core
+cc  -std=c11   -I . -I ../../protocol test_core.c -o test_core && ./test_core
+c++ -std=c++17 -I test -I . -I ../../protocol test/test_io.cpp -o test_io && ./test_io
+c++ -std=c++17 -I test -I . -I ../../protocol test/test_provision.cpp -o test_prov && ./test_prov
 ```

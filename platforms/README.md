@@ -8,7 +8,7 @@ all speak the same wire protocol, so the **same desktop app drives all of them**
 |----------|----------------------|---------|-----------|--------|
 | [`common`](common) | header-only C (the shared core) | all C/C++ ports | — | ✅ |
 | [`ch55xduino`](ch55xduino) | ch55xduino + arduino-cli (SDCC) | CH551/2/4 | USB dual-CDC | ✅ working |
-| [`espressif`](espressif) | Arduino / PlatformIO | ESP32 / S3 / C3 | USB mux | ✅ working |
+| [`espressif`](espressif) | Arduino / PlatformIO | ESP32 / S3 / C3 / Waveshare S3-Zero | USB mux | ✅ working |
 | [`pico`](pico) | arduino-pico / PlatformIO | RP2040 / RP2350 | USB mux | ✅ working |
 | [`zephyr`](zephyr) | west + Zephyr SDK | nRF52840 (DK + dongle) | USB mux | ✅ working |
 | [`host`](host) | CMake (native C) | Linux/macOS/Windows | WebSocket | ✅ reference |
@@ -16,6 +16,8 @@ all speak the same wire protocol, so the **same desktop app drives all of them**
 
 Everything except `ch55xduino` (which has cheap composite-USB silicon) and the planned
 MicroPython port builds on the [`common`](common) core; new C/C++ ports should too.
+Within the Arduino platforms, board support is layered `mcu/ → boards/<vendor>/ →
+targets/` — see [../BOARDS.md](../BOARDS.md) for the model and how to add a board.
 
 ## Build system (QMK-style)
 

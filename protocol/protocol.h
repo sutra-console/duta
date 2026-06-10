@@ -123,7 +123,7 @@ enum {
 
 // ===========================================================================
 // skrit-mux — one byte stream carrying BOTH the DATA console and the CMD
-// protocol, for transports with a single channel (single USB-CDC, TCP, BLE).
+// protocol, for transports with a single channel (single USB-CDC, WebSocket).
 // Dual-CDC devices (e.g. CH552) do NOT mux: DATA is its own raw port. A muxed
 // device sets SKRIT_CAP_MUX in INFO.
 //

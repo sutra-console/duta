@@ -12,7 +12,7 @@
 //   skrit_dev_init(&dev, &my_hal, /*ctx*/NULL, /*muxed*/true);
 //   ... in the main loop, forever ...
 //   skrit_dev_poll(&dev);                 // tee target console -> host
-//   while (cmd_endpoint_has_byte())       // bytes from USB/TCP/BLE CMD stream
+//   while (cmd_endpoint_has_byte())       // bytes from USB/WS/BLE CMD stream
 //       skrit_dev_rx(&dev, next_byte());
 //
 // The core never allocates and keeps a fixed, small RAM footprint. Multi-byte

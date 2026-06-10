@@ -59,7 +59,7 @@ arduino-cli config init
 arduino-cli config add board_manager.additional_urls \
   https://raw.githubusercontent.com/DeqingSun/ch55xduino/ch55xduino/package_ch55xduino_mcs51_index.json
 arduino-cli core update-index
-arduino-cli core install CH55xDuino:mcs51
+arduino-cli core install CH55xDuino:mcs51@0.0.25   # pinned, matches CI
 
 arduino-cli compile --fqbn "CH55xDuino:mcs51:ch552:usb_settings=user266" platforms/ch55xduino
 ```
@@ -102,10 +102,12 @@ UART0 bridge) is board-agnostic. Pick a board at the top of
 
 To add a board, copy [`src/boards/custom.h`](src/boards/custom.h), fill in the
 pins (ch55xduino style: `Px.y → x*10+y`, e.g. `P3.4 → 34`), and select
-`BOARD_CUSTOM`. Each header defines `RELAY1_PIN RELAY2_PIN RELAY_ACTIVE_LOW
-LED_PIN LED_ACTIVE_LOW OLED_SCL_PIN OLED_SDA_PIN OLED_I2C_ADDR` (+ optional
-`PARITY_SUPPORT`). Avoid **P3.6/P3.7** (USB) and **P3.0/P3.1** (UART0).
-`board.h` `#error`s on a missing pin.
+`BOARD_CUSTOM`. Each header defines `BOARD_NAME BOARD_VENDOR RELAY1_PIN
+RELAY2_PIN RELAY_ACTIVE_LOW LED_PIN LED_ACTIVE_LOW OLED_SCL_PIN OLED_SDA_PIN
+OLED_I2C_ADDR` (+ optional `PARITY_SUPPORT`). Avoid **P3.6/P3.7** (USB) and
+**P3.0/P3.1** (UART0). `board.h` `#error`s on a missing pin. The CH55x is
+**compile-time only** — no runtime provisioning (no room); see
+[BOARDS.md](../../BOARDS.md) for why this platform stays on arduino-cli.
 
 ## Layout
 

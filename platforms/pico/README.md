@@ -3,9 +3,14 @@
 Duta on the RP2040 / RP2350 via **Arduino + PlatformIO** (the
 [earlephilhower arduino-pico core](https://github.com/earlephilhower/arduino-pico)),
 built on the shared core ([`../common/skrit_device.h`](../common/skrit_device.h)) with
-table-driven IO ([`board.h`](src/board.h) + the
-[`duta_io`](../common/duta_io_arduino.h) driver). A full adapter: DATA console bridge,
-the skrit-mc macro VM (tiers 1–2), serial control, and reboot-to-bootloader.
+table-driven IO (the [`duta_io`](../common/duta_io_arduino.h) driver). A full adapter:
+DATA console bridge, the skrit-mc macro VM (tiers 1–2), serial control, and
+reboot-to-bootloader.
+
+Board support follows [BOARDS.md](../../BOARDS.md): [`src/mcu/`](src/mcu) (silicon
+truth), [`src/boards/raspberrypi/`](src/boards) (vendored board facts — e.g. GP25 is
+the onboard LED and is *not* on a header), [`src/targets/`](src/targets) (our wiring);
+[`src/board.h`](src/board.h) dispatches `-DBOARD_*` to a target.
 
 ```sh
 pio run                   # default env (pico)
@@ -26,19 +31,24 @@ so the mux always rides the on-chip USB CDC.
 | `PICO` (default) | 0 / 1 | 2 / 3 | 25 | native CDC |
 | `PICO2` | 0 / 1 | 2 / 3 | 25 | native CDC |
 
-Edit [`src/board.h`](src/board.h) to remap pins, add outputs to the `duta_outputs[]`
-table (one row per relay/LED/PWM, or wire a WS2812 strip as an RGB row), or set the
+Edit the target header ([`src/targets/`](src/targets)) to remap pins, add outputs (one
+`duta_io` row per relay/LED/PWM, or wire a WS2812 strip as an RGB row), or set the
 optional `DTR/RTS` auto-reset lines (`-1` = unused).
 
 ## What it answers
 
 `PING` · `INFO` (caps = mux + serial + reboot + pwm, `macro_tier = 2`) · `DEVICE_NAME` ·
-`OUTPUT_SET/GET/TOGGLE/DESC/PULSE/PWM` (Aux LED dims 0–1023) · `SERIAL_GET/SET/SIGNAL` (set DATA baud/parity,
-drive DTR/RTS/BREAK to enter ESP/AVR bootloaders) · `REBOOT` (app, or the RP2040/RP2350
-UF2/BOOTSEL bootloader) · `MACRO_WRITE_*`/`MACRO_RUN` for scratch (`0xFF`) push-and-run.
+`DATA_DESC` (uart) · `OUTPUT_SET/GET/TOGGLE/DESC/PULSE/PWM` (Aux LED dims 0–1023) ·
+`PWM_CONFIG` (frequency + resolution get/set) · `SERIAL_GET/SET/SIGNAL` (set DATA
+baud/parity, drive DTR/RTS/BREAK to enter ESP/AVR bootloaders) · `REBOOT` (app, or the
+RP2040/RP2350 UF2/BOOTSEL bootloader) · `MACRO_WRITE_*`/`MACRO_RUN` for scratch (`0xFF`)
+push-and-run.
 
 ## Roadmap
 
+- **Runtime provisioning** — the mcu/board maps are in place; wire `DUTA_PROVISION` +
+  LittleFS persistence in `main.cpp` (mirrors the ESP32 port's NVS hooks) to accept IO
+  re-provisioning from the app.
 - **Persistent macros** — back the `0x00..0xFE` macro ids with LittleFS on the on-board
   flash (the core already has the VM; just needs a storage hook).
 - **Dual-CDC mode** — expose a second TinyUSB CDC interface so DATA gets its own raw
