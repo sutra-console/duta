@@ -12,11 +12,20 @@ truth), [`src/boards/raspberrypi/`](src/boards) (vendored board facts — e.g. G
 the onboard LED and is *not* on a header), [`src/targets/`](src/targets) (our wiring);
 [`src/board.h`](src/board.h) dispatches `-DBOARD_*` to a target.
 
+## Build & flash
+
 ```sh
-pio run                   # default env (pico)
-pio run -e pico2
-pio run -e pico2 -t upload
+# from platforms/pico/
+pio run                          # build the default env (pico)
+pio run -e pico2                 # Pico 2 / RP2350
+pio run -e pico -t upload        # flash
 ```
+
+**First flash:** hold **BOOTSEL** while plugging in USB — the board mounts as a UF2
+drive and `-t upload` (or dragging `.pio/build/<env>/firmware.uf2` onto it) flashes it.
+After that the button is optional: `-t upload` resets a running Duta into BOOTSEL
+automatically (1200-baud touch), and the app's *Reboot → bootloader* (skrit `REBOOT`
+mode 1) does the same over the protocol.
 
 ## Transport
 

@@ -6,12 +6,24 @@ Duta on ESP32 via **Arduino + PlatformIO**, built on the shared core
 (tiers 1–2), serial control, PWM frequency/resolution, addressable RGB, and
 reboot-to-bootloader.
 
+## Build & flash
+
 ```sh
-pio run                   # default env (esp32s3)
-pio run -e s3zero -t upload
-pio run -e esp32c3
-pio run -e esp32 -t upload
+# from platforms/espressif/
+pio run                          # build the default env (esp32s3)
+pio run -e s3zero                # or: esp32s3 / esp32c3 / esp32
+pio run -e s3zero -t upload      # flash (auto-detects the port)
+pio device monitor               # optional: watch the CDC output
 ```
+
+**First flash on native-USB boards (S3 / C3 / S3-Zero):** these have no USB-UART
+bridge, so a board that isn't already running Arduino firmware won't auto-enter the
+bootloader — **hold BOOT while plugging in USB** (the ROM downloader enumerates), then
+`-t upload`. After the first flash you never touch the button again: the app's
+*Reboot → bootloader* (skrit `REBOOT` mode 1) re-enters the downloader over USB.
+
+**Classic ESP32 DevKit:** the onboard CP2102 + auto-reset circuit handle bootloader
+entry; plain `-t upload` always works.
 
 ## Board layout — `mcu/ → boards/<vendor>/ → targets/`
 

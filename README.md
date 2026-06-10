@@ -52,12 +52,33 @@ On boards that advertise the **provision** flag (ESP32 family), the IO table is 
 new table (`CONFIG_SET`, validated against the pin map, persisted to NVS), and a reboot
 applies it — re-pin a relay without recompiling.
 
-## Build
+## Build & flash
 
 [`targets.yml`](targets.yml) lists the official targets `(platform, board,
 transport)`; [CI](.github/workflows/firmware.yml) builds each on push/PR. Fork,
-add your board, inherit the build system. Per-platform instructions live in each
-`platforms/<name>/README.md`.
+add your board, inherit the build system. Full instructions (incl. first-flash
+bootloader entry) live in each `platforms/<name>/README.md`; the short version:
+
+```sh
+# ESP32 family (PlatformIO) — platforms/espressif/
+pio run -e esp32s3 -t upload      # envs: esp32s3 · s3zero · esp32c3 · esp32
+
+# Pico / Pico 2 (PlatformIO) — platforms/pico/
+pio run -e pico -t upload         # first flash: hold BOOTSEL (UF2)
+
+# nRF52840 (Zephyr) — from a Zephyr workspace
+west build -b nrf52840dk/nrf52840 platforms/zephyr && west flash
+
+# CH552 (arduino-cli; core pinned @0.0.25 — see the platform README)
+arduino-cli compile --fqbn "CH55xDuino:mcs51:ch552:usb_settings=user266" platforms/ch55xduino
+
+# host reference (CMake) — a runnable WebSocket Duta, no hardware
+cmake -B build platforms/host && cmake --build build && ./build/duta-host 9555
+```
+
+Once a Duta is flashed, **re-flashing never needs a button**: the app's
+*Reboot → bootloader* (skrit `REBOOT`) drops the board into its DFU/UF2/download
+mode over the protocol.
 
 ## Adding a platform
 
