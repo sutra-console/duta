@@ -20,8 +20,8 @@ in [`../platforms`](../platforms) implement this and nothing app-specific.
 
 The CMD protocol is transport-independent. Dual-CDC USB (CH552) gives two pipes
 (raw DATA console + framed CMD); a single channel (one USB-CDC, WebSocket)
-carries **both** via skrit-mux; BLE is dual by GATT design (NUS console + a
-skrit CMD service). Network transports are auth-gated (`AUTH`). See
+carries **both** via skrit-mux; BLE is dual by GATT design (two skrit GATT
+services: DATA console + CMD). Network transports are auth-gated (`AUTH`). See
 [PROTOCOL.md → Transports](PROTOCOL.md).
 
 Implementing a new platform = implement this protocol over whatever transport

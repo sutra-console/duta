@@ -23,11 +23,11 @@ DATA + CMD are **multiplexed over one channel** ([skrit-mux](../../protocol/PROT
 selected at build time:
 
 - **USB CDC ACM** (default) — a `cdc_acm_uart0` node under `zephyr_udc0`.
-- **BLE — dual-channel** (`overlay-ble.conf`, sets `CONFIG_BT`) — a Nordic UART Service
-  carries the raw DATA console (so plain BLE-UART terminals read it) and a sibling
-  **skrit CMD service** (`6E41…`) carries the framed CMD protocol. Not muxed. The device
-  advertises the CMD UUID + a `Duta`-prefixed name. **Scaffold** — build-checked in CI,
-  not yet hardware-validated.
+- **BLE — dual-channel** (`overlay-ble.conf`, sets `CONFIG_BT`) — two **skrit GATT
+  services**: DATA carries the raw console (its UUID is NUS-compatible, so plain
+  BLE-UART terminals read it) and the sibling CMD service (`6E41…`) carries the framed
+  CMD protocol. Not muxed. The device advertises the CMD UUID + a `Duta`-prefixed name.
+  **Scaffold** — build-checked in CI, not yet hardware-validated.
 
 The target console is a **hardware UART** (`duta-data` devicetree alias → `uart1`) in
 both. Bring your own board by dropping a `boards/<board>.overlay` (a `cdc_acm_uart0` node
@@ -49,7 +49,7 @@ GPREGRET→DFU on nRF52) · scratch (`0xFF`) macro push-and-run via the shared s
 
 ## Roadmap
 
-- **BLE NUS transport** — *scaffolded* (`overlay-ble.conf`); the Sutra app has a BLE
+- **BLE transport** — *scaffolded* (`overlay-ble.conf`); the Sutra app has a BLE
   central (Scan ▸ connect). Needs on-hardware validation: notify flow-control, MTU
   negotiation, pairing/bonding policy.
 - **Dual CDC ACM** — a second `cdc_acm_uart` instance for a raw, un-muxed DATA port that

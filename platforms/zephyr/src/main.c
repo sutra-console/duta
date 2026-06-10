@@ -55,7 +55,7 @@ static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
 static skrit_dev dev;
 
 // ===========================================================================
-// Transport: BLE (NUS) when CONFIG_BT, else USB CDC ACM
+// Transport: BLE (GATT) when CONFIG_BT, else USB CDC ACM
 // ===========================================================================
 #if defined(CONFIG_BT)
 #include <zephyr/bluetooth/bluetooth.h>
@@ -63,11 +63,11 @@ static skrit_dev dev;
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
 
-// BLE is dual-channel (like dual-CDC): a Nordic UART Service carries the raw
-// DATA console (so plain BLE-UART terminals read it), and a sibling skrit CMD
-// service carries the framed CMD protocol. Not muxed.
-//   DATA = NUS:        6E40 0001 / 0002 (RX) / 0003 (TX)
-//   CMD  = skrit svc:  6E41 0001 / 0002 (RX) / 0003 (TX)  (Nordic base, 6E41)
+// BLE is dual-channel (like dual-CDC): two skrit GATT services. DATA carries
+// the raw console (its UUID is NUS-compatible so plain BLE-UART terminals read
+// it); the sibling CMD service carries the framed CMD protocol. Not muxed.
+//   DATA svc: 6E40 0001 / 0002 (RX) / 0003 (TX)   (NUS-compatible UUID)
+//   CMD  svc: 6E41 0001 / 0002 (RX) / 0003 (TX)   (same vendor base, 6E41)
 #define DATA_SVC BT_UUID_128_ENCODE(0x6e400001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
 #define CMD_SVC BT_UUID_128_ENCODE(0x6e410001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e)
 static struct bt_uuid_128 data_svc_uuid = BT_UUID_INIT_128(DATA_SVC);
@@ -196,7 +196,7 @@ static void transport_start(void) {
   ble_advertise();
 }
 
-#define TRANSPORT_MUXED 0           // BLE is dual-channel (NUS DATA + CMD service)
+#define TRANSPORT_MUXED 0           // BLE is dual-channel (DATA + CMD GATT services)
 #define TRANSPORT_CAP_MUX 0         // not muxed
 #define TRANSPORT_HOST_WRITE ble_data_notify // dual: console out is its own pipe
 
@@ -357,8 +357,8 @@ int main(void) {
   transport_start();
 
 #if defined(CONFIG_BT)
-  // BLE: received bytes arrive via the NUS write callback (nus_rx); the loop
-  // only tees the target console out and lets the BT stack run.
+  // BLE: received bytes arrive via the GATT write callbacks (data_rx/cmd_rx);
+  // the loop only tees the target console out and lets the BT stack run.
   for (;;) {
     skrit_dev_poll(&dev);
     k_msleep(1);

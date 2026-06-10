@@ -87,6 +87,6 @@ bootloaders) · `REBOOT` (app, or download/DFU on native-USB chips) ·
   already has the VM; just needs a storage hook).
 - **WiFi WebSocket "bridge mode"** — run a WS server (esp_http_server) feeding a muxed `skrit_dev`,
   so Sutra can reach the target over the network (mirrors [`../host`](../host)).
-- **BLE** — the dual NUS + CMD-service transport (mirrors the Zephyr scaffold).
+- **BLE** — the dual skrit GATT services (DATA + CMD; mirrors the Zephyr scaffold).
 - **Analog inputs** — populate `n_inputs` + the `in_*` HAL callbacks (e.g. an LDR for
   `WAITIO`).

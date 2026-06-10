@@ -36,7 +36,7 @@ small HAL (drive a pin, read a UART byte, get a tick) and a two-line main loop.
 |-----------|--------|-----------|
 | **usb-dual-cdc** | CH552 | two USB-CDC ports (raw DATA + framed CMD) |
 | **usb-mux** | ESP32(-S3/C3), S3-Zero, Pico, Pico 2, nRF52840 | one USB-CDC, multiplexed (skrit-mux) |
-| **ble** | nRF52840 *(scaffold)* | dual: NUS console + a skrit CMD service (GATT) |
+| **ble** | nRF52840 *(scaffold)* | dual: two skrit GATT services (DATA console + CMD) |
 | **websocket** | host, ESP32 WiFi *(roadmap)* | mux over WS binary frames; auth-gated (`AUTH`) |
 
 ## Boards — `platform → mcu → board → target`
