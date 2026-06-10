@@ -45,4 +45,16 @@
 #define LED_ACTIVE_LOW 0
 #endif
 
+// ---- IO table: WHAT this board exposes (driven by duta_io_arduino.h) -------
+// The Pico has no onboard addressable LED, so no RGB row. Wire a WS2812 strip
+// and add { SKRIT_CTRL_RGB, <pin>, "Strip", 0, <count> } + DUTA_RGB_PIN/COUNT.
+#include "protocol.h" // SKRIT_CTRL_*
+#include "duta_io.h"  // duta_io descriptor + DUTA_ACTIVE_LOW
+
+static const duta_io duta_outputs[] = {
+    {SKRIT_CTRL_IO, RELAY1_PIN, "Relay 1", RELAY_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+    {SKRIT_CTRL_IO, RELAY2_PIN, "Relay 2", RELAY_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+    {SKRIT_CTRL_PWM, LED_PIN, "Aux LED", LED_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+};
+
 #endif // DUTA_PICO_BOARD_H

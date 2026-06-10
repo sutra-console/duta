@@ -2,9 +2,10 @@
 
 Duta on the RP2040 / RP2350 via **Arduino + PlatformIO** (the
 [earlephilhower arduino-pico core](https://github.com/earlephilhower/arduino-pico)),
-built on the shared core ([`../common/skrit_device.h`](../common/skrit_device.h)). A
-full adapter, not a skeleton: DATA console bridge, the skrit-mc macro VM (tiers 1–2),
-serial control, and reboot-to-bootloader.
+built on the shared core ([`../common/skrit_device.h`](../common/skrit_device.h)) with
+table-driven IO ([`board.h`](src/board.h) + the
+[`duta_io`](../common/duta_io_arduino.h) driver). A full adapter: DATA console bridge,
+the skrit-mc macro VM (tiers 1–2), serial control, and reboot-to-bootloader.
 
 ```sh
 pio run                   # default env (pico)
@@ -25,8 +26,9 @@ so the mux always rides the on-chip USB CDC.
 | `PICO` (default) | 0 / 1 | 2 / 3 | 25 | native CDC |
 | `PICO2` | 0 / 1 | 2 / 3 | 25 | native CDC |
 
-Edit [`src/board.h`](src/board.h) to remap pins or wire the optional `DTR/RTS`
-auto-reset lines (`-1` = unused).
+Edit [`src/board.h`](src/board.h) to remap pins, add outputs to the `duta_outputs[]`
+table (one row per relay/LED/PWM, or wire a WS2812 strip as an RGB row), or set the
+optional `DTR/RTS` auto-reset lines (`-1` = unused).
 
 ## What it answers
 

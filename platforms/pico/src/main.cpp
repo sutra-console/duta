@@ -4,20 +4,20 @@
 //
 //   * DATA console  — a hardware UART (Serial1 = UART0 on DATA_TX/DATA_RX)
 //                     bridged to the target, full duplex.
-//   * CMD + DATA    — multiplexed over the single native USB-CDC via skrit-mux,
-//                     so the Sutra app opens ONE port and gets both.
-//   * Controls      — 2 relays + an aux LED, self-describing.
-//   * Macro VM      — skrit-mc tiers 1-2 (EMIT/DELAY/SETOUT/EXPECT/WAITIO),
-//                     scratch push-and-run (no flash wear).
+//   * CMD + DATA    — multiplexed over the single native USB-CDC via skrit-mux.
+//   * Controls      — declared as a table in board.h, driven by the shared
+//                     duta_io driver (2 digital outputs + a PWM LED).
+//   * Macro VM      — skrit-mc tiers 1-2; scratch push-and-run.
 //   * Serial control— SERIAL_GET/SET reconfigures the DATA UART; SERIAL_SIGNAL
 //                     drives DTR/RTS (auto-reset into ESP/AVR bootloaders) + BREAK.
 //   * REBOOT        — app reset, or reboot-to-UF2-bootloader (BOOTSEL/DFU).
 //
-// The protocol/CRC/COBS/VM all live in the shared core; this file is just the
-// RP2040/RP2350 HAL + the two-line main loop.
+// IO is table-driven (board.h `duta_outputs[]` + duta_io_arduino.h); this file
+// is just the transport, serial, and reboot HAL plus the two-line main loop.
 #include <Arduino.h>
 
-#include "board.h"
+#include "board.h"            // declares the duta_outputs[] table
+#include "duta_io_arduino.h"  // generic IO driver -> skrit_hal IO callbacks
 extern "C" {
 #include "skrit_device.h"
 }
@@ -31,23 +31,8 @@ static SerialUART &TARGET = Serial1;
 
 static uint32_t g_baud = 115200;
 static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
-static uint8_t g_out[3]; // relay1, relay2, led
-
-static const char *const OUT_NAME[3] = {"Relay 1", "Relay 2", "Aux LED"};
-static const uint8_t OUT_TYPE[3] = {SKRIT_CTRL_IO, SKRIT_CTRL_IO, SKRIT_CTRL_PWM};
-static uint16_t g_pwm[3]; // duty 0..1023 (only the LED channel is PWM-capable)
-static const int8_t OUT_PIN[3] = {RELAY1_PIN, RELAY2_PIN, LED_PIN};
 
 static skrit_dev dev;
-
-// ---- helpers ---------------------------------------------------------------
-static void applyOut(uint8_t idx, uint8_t on) {
-  if (idx > 2) return;
-  g_out[idx] = on ? 1 : 0;
-  g_pwm[idx] = on ? 1023 : 0; // a plain set snaps the duty to the rails
-  bool activeLow = (idx == 2) ? LED_ACTIVE_LOW : RELAY_ACTIVE_LOW;
-  digitalWrite(OUT_PIN[idx], (on ^ activeLow) ? HIGH : LOW);
-}
 
 // Translate (bits,parity,stop) into the Arduino SerialConfig word, covering the
 // configs people actually use; falls back to 8N1.
@@ -66,7 +51,7 @@ static void beginTarget() {
   TARGET.begin(g_baud, serialConfig(g_bits, g_parity, g_stop));
 }
 
-// ---- HAL callbacks ---------------------------------------------------------
+// ---- transport + serial HAL (IO callbacks come from duta_io_arduino.h) ------
 static void hal_link_write(void *, const uint8_t *p, uint16_t n) { Serial.write(p, n); }
 static void hal_data_write(void *, const uint8_t *p, uint16_t n) { TARGET.write(p, n); }
 
@@ -75,25 +60,6 @@ static uint16_t hal_data_read(void *, uint8_t *out, uint16_t cap) {
   while (TARGET.available() && k < cap) out[k++] = (uint8_t)TARGET.read();
   return k;
 }
-
-static void hal_out_set(void *, uint8_t idx, uint8_t on) { applyOut(idx, on); }
-static uint8_t hal_out_get(void *, uint8_t idx) { return idx < 3 ? g_out[idx] : 0; }
-static void hal_out_desc(void *, uint8_t idx, uint8_t *type, const char **name) {
-  if (idx > 2) return;
-  *type = OUT_TYPE[idx];
-  *name = OUT_NAME[idx];
-}
-
-// PWM rides the hardware-PWM-backed analogWrite on the LED channel (the range
-// is set to 0..1023 in setup). Relays are mechanical — strictly on/off.
-static uint8_t hal_pwm_set(void *, uint8_t idx, uint16_t duty) {
-  if (idx > 2 || OUT_TYPE[idx] != SKRIT_CTRL_PWM) return 0;
-  g_pwm[idx] = duty;
-  g_out[idx] = duty > 0;
-  analogWrite(OUT_PIN[idx], LED_ACTIVE_LOW ? (1023 - duty) : duty);
-  return 1;
-}
-static uint16_t hal_pwm_get(void *, uint8_t idx) { return idx < 3 ? g_pwm[idx] : 0; }
 
 static void hal_serial_get(void *, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop) {
   *baud = g_baud;
@@ -141,19 +107,31 @@ static void hal_reboot(void *, uint8_t mode) {
 static uint32_t hal_millis(void *) { return millis(); }
 static void hal_pump(void *) {} // earlephilhower core services USB in the background
 
-static const skrit_hal HAL = {
+// caps: advertise PWM only if the board table actually has a PWM output.
+static uint8_t board_caps() {
+  uint8_t caps = SKRIT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT;
+  for (uint8_t i = 0; i < DUTA_N_OUTPUTS; i++)
+    if (duta_outputs[i].type == SKRIT_CTRL_PWM) caps |= SKRIT_CAP_PWM;
+  return caps;
+}
+
+static skrit_hal HAL = {
     /*name*/ BOARD_NAME,
     /*fw_ver*/ (FW_HI << 8) | FW_LO,
-    /*caps*/ SKRIT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT | SKRIT_CAP_PWM,
+    /*caps*/ 0, // filled in setup() from the board table
     /*macro_tier*/ SKRIT_TIER_INTERACTIVE,
     /*store_kb*/ 0,
-    /*n_outputs*/ 3,
-    /*n_inputs*/ 0,
+    /*n_outputs*/ DUTA_N_OUTPUTS,
+    /*n_inputs*/ DUTA_N_INPUTS,
     hal_link_write, hal_data_write, /*host_write*/ nullptr, hal_data_read,
-    hal_out_set, hal_out_get, hal_out_desc,
-    hal_pwm_set, hal_pwm_get,
-    /*rgb_count*/ nullptr, /*rgb_set*/ nullptr, /*rgb_get*/ nullptr, // no addressable LED
+    duta_io_out_set, duta_io_out_get, duta_io_out_desc,
+    duta_io_pwm_set, duta_io_pwm_get,
+    duta_io_rgb_count, duta_io_rgb_set, duta_io_rgb_get,
+#ifdef DUTA_HAVE_INPUTS
+    duta_io_in_desc, duta_io_in_get,
+#else
     /*in_desc*/ nullptr, /*in_get*/ nullptr,
+#endif
     hal_serial_get, hal_serial_set, hal_serial_signal,
     hal_reboot,
     hal_millis, hal_pump,
@@ -161,17 +139,14 @@ static const skrit_hal HAL = {
 
 // ---- Arduino entry points --------------------------------------------------
 void setup() {
-  for (int i = 0; i < 3; i++) {
-    pinMode(OUT_PIN[i], OUTPUT);
-    applyOut(i, 0);
-  }
+  duta_io_begin(); // configure every output/input from the board table
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
-  analogWriteRange(1023); // PWM duty in skrit units (OUT_PWM is 0..1023)
 
   Serial.begin(115200); // native USB-CDC — the mux link
   beginTarget();
 
+  HAL.caps = board_caps();
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
 }
 

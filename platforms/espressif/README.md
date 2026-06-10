@@ -1,9 +1,10 @@
 # espressif (ESP32 / ESP32-S3 / ESP32-C3)
 
 Duta on ESP32 via **Arduino + PlatformIO**, built on the shared core
-([`../common/skrit_device.h`](../common/skrit_device.h)). A full adapter, not a
-skeleton: DATA console bridge, the skrit-mc macro VM (tiers 1–2), serial control,
-and reboot-to-bootloader.
+([`../common/skrit_device.h`](../common/skrit_device.h)) with table-driven IO
+([`board.h`](src/board.h) + the [`duta_io`](../common/duta_io_arduino.h) driver).
+A full adapter: DATA console bridge, the skrit-mc macro VM (tiers 1–2), serial
+control, and reboot-to-bootloader.
 
 ```sh
 pio run                   # default env (esp32s3)
