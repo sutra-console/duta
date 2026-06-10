@@ -1,4 +1,7 @@
 # Minimal west manifest so CI (and a fresh checkout) can resolve Zephyr.
+# Lives at the repo root so `west init -l` makes the checkout parent the
+# workspace topdir (what action-zephyr-setup expects); the app itself is
+# platforms/zephyr.
 # Inside an existing Zephyr workspace you don't need this — just `west build`.
 manifest:
   remotes:
@@ -16,4 +19,4 @@ manifest:
           - hal_nordic
           - picolibc
   self:
-    path: application
+    path: duta
