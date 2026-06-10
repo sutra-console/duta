@@ -179,6 +179,7 @@ enum {
   SKRIT_DATA_SPI = 3,       // SPI
   SKRIT_DATA_BLE_SNIFF = 4, // sniffed BLE packets
   SKRIT_DATA_LOGIC = 5,     // logic-analyzer samples
+  SKRIT_DATA_I2C = 6,       // I2C transactions (first non-UART backend target)
 };
 
 // ---- CRC-8/ATM (poly 0x07, init 0x00) ----
