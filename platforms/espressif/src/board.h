@@ -70,4 +70,22 @@
 #define LED_ACTIVE_LOW 0
 #endif
 
+// ---- IO table: WHAT this board exposes (driven by duta_io_arduino.h) -------
+#include "protocol.h" // SKRIT_CTRL_*
+#include "duta_io.h"  // duta_io descriptor + DUTA_ACTIVE_LOW
+
+#if RGB_PIN >= 0
+#define DUTA_RGB_PIN RGB_PIN     // FastLED needs the pin as a compile-time arg
+#define DUTA_RGB_COUNT RGB_COUNT
+#endif
+
+static const duta_io duta_outputs[] = {
+    {SKRIT_CTRL_RELAY, RELAY1_PIN, "Relay 1", RELAY_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+    {SKRIT_CTRL_RELAY, RELAY2_PIN, "Relay 2", RELAY_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+    {SKRIT_CTRL_PWM, LED_PIN, "Aux LED", LED_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+#if RGB_PIN >= 0
+    {SKRIT_CTRL_RGB, RGB_PIN, "RGB LED", 0, RGB_COUNT},
+#endif
+};
+
 #endif // DUTA_ESP_BOARD_H

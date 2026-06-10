@@ -31,6 +31,12 @@ jobs:
             -I platforms/common -I protocol \
             platforms/common/test_core.c -o /tmp/test_core
           /tmp/test_core
+      - name: Build + run the table-driven IO test (mock Arduino)
+        run: |
+          c++ -std=c++17 -Wall -Wextra \
+            -I platforms/common/test -I platforms/common -I protocol \
+            platforms/common/test/test_io.cpp -o /tmp/test_io
+          /tmp/test_io
 
   # ---- CH55x: the authoritative dual-CDC firmware build ----
   ch55xduino:

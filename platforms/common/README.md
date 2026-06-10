@@ -19,6 +19,24 @@ A platform sets `hal.caps` (incl. `SKRIT_CAP_MUX` iff it constructed the device 
 `hal.macro_tier` (0 = no VM, 2 = full interactive), and wires the callbacks it supports
 — a `NULL` callback degrades to a clean `unsupported`/`bad args` reply, never a crash.
 
+## Table-driven IO (Arduino platforms)
+
+The Arduino ports (espressif, pico) don't hand-write the IO callbacks: a board declares
+its outputs/inputs as a table of [`duta_io`](duta_io.h) descriptors, and
+[`duta_io_arduino.h`](duta_io_arduino.h) *is* the `skrit_hal` IO callbacks
+(`out_*`, `pwm_*`, `rgb_*`, `in_*`) driving that table. Adding a relay is one row:
+
+```c
+static const duta_io duta_outputs[] = {
+  { SKRIT_CTRL_RELAY, RELAY1_PIN, "Relay 1", DUTA_ACTIVE_LOW },
+  { SKRIT_CTRL_PWM,   LED_PIN,    "Aux LED" },
+  { SKRIT_CTRL_RGB,   RGB_PIN,    "RGB LED", 0, RGB_COUNT },
+};
+```
+
+`main.cpp` then only wires transport/serial/reboot and points the HAL's IO fields at
+`duta_io_*`. Zephyr drives IO from its devicetree instead (already a declarative table).
+
 ## What's implemented here vs. per-platform
 
 | In the core (free for every port) | Left to the platform HAL |
