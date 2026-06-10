@@ -49,7 +49,7 @@ extern "C" {
 #include "skrit_device.h"
 }
 
-#if defined(BOARD_ESP32S3) || defined(BOARD_ESP32C3)
+#if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
 #include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG — force download (DFU) boot
 #endif
 
@@ -124,7 +124,7 @@ static void hal_serial_signal(void *, uint8_t mask, uint8_t value) {
 
 static void hal_reboot(void *, uint8_t mode) {
   Serial.flush();
-#if defined(BOARD_ESP32S3) || defined(BOARD_ESP32C3)
+#if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
   if (mode == SKRIT_REBOOT_BOOTLOADER) {
     // Latch the ROM download/DFU path, then reset — the native USB re-enumerates
     // as the serial/JTAG downloader (no BOOT-button dance needed).

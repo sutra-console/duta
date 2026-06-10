@@ -6,12 +6,15 @@
 // ESP32-S3 DevKitC. See BOARDS.md for the platform → mcu → board → target
 // layering (vendored boards are facts; targets assign the Duta roles).
 
-#if !defined(BOARD_ESP32S3) && !defined(BOARD_ESP32C3) && !defined(BOARD_ESP32)
+#if !defined(BOARD_ESP32S3) && !defined(BOARD_ESP32C3) && !defined(BOARD_ESP32) && \
+    !defined(BOARD_S3_ZERO)
 #define BOARD_ESP32S3
 #endif
 
 #if defined(BOARD_ESP32S3)
 #include "targets/duta_devkitc_s3.h"
+#elif defined(BOARD_S3_ZERO)
+#include "targets/duta_s3_zero.h"
 #elif defined(BOARD_ESP32C3)
 #include "targets/duta_devkitm_c3.h"
 #elif defined(BOARD_ESP32)
@@ -19,7 +22,7 @@
 #endif
 
 #ifndef BOARD_NAME
-#error "No target selected — define BOARD_ESP32S3 / BOARD_ESP32C3 / BOARD_ESP32 (see platformio.ini)."
+#error "No target selected — define BOARD_ESP32S3 / BOARD_S3_ZERO / BOARD_ESP32C3 / BOARD_ESP32 (see platformio.ini)."
 #endif
 
 #endif // DUTA_ESP_BOARD_H

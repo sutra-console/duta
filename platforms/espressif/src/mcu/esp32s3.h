@@ -25,7 +25,7 @@ static const duta_pin duta_mcu_pins[] = {
     {0, S3_FREE, DUTA_PIN_CAUTION, DUTA_NO_BUS}, // strapping (boot)
     {1, S3_FREE, DUTA_PIN_FREE, DUTA_NO_BUS},
     {2, S3_FREE, DUTA_PIN_FREE, DUTA_NO_BUS},
-    {3, S3_FREE, DUTA_PIN_FREE, DUTA_NO_BUS},
+    {3, S3_FREE, DUTA_PIN_CAUTION, DUTA_NO_BUS}, // strapping (JTAG source)
     {4, S3_FREE, DUTA_PIN_FREE, DUTA_NO_BUS},
     {5, S3_FREE, DUTA_PIN_FREE, DUTA_NO_BUS},
     {6, S3_FREE, DUTA_PIN_FREE, DUTA_NO_BUS},
