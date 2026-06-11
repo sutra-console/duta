@@ -18,6 +18,9 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), io_channels)
+#include <zephyr/drivers/adc.h>
+#endif
 #if defined(CONFIG_REBOOT)
 #include <zephyr/sys/reboot.h>
 #endif
@@ -48,6 +51,18 @@ static uint8_t g_out[3];
 // optional target reset/boot lines (drive a target's DTR/RTS-equivalent pins)
 static const struct gpio_dt_spec dtr_gpio = GPIO_DT_SPEC_GET_OR(DT_ALIAS(duta_dtr), gpios, {0});
 static const struct gpio_dt_spec rts_gpio = GPIO_DT_SPEC_GET_OR(DT_ALIAS(duta_rts), gpios, {0});
+
+// ---- optional ADC input (skrit input 0) — present when a board overlay gives a
+// `zephyr,user` node with `io-channels` (see the promicro overlay). Reports the
+// channel in millivolts. -----------------------------------------------------
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), io_channels)
+#define HAVE_ADC 1
+#define DUTA_N_INPUTS 1
+static const struct adc_dt_spec adc_ch = ADC_DT_SPEC_GET(DT_PATH(zephyr_user));
+#else
+#define HAVE_ADC 0
+#define DUTA_N_INPUTS 0
+#endif
 
 static uint32_t g_baud = 115200;
 static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
@@ -208,9 +223,16 @@ static void transport_start(void) {
 
 #else // ---- USB CDC ACM transport (default) ----
 
+// The CDC ACM that carries the mux link. Our overlays add `cdc_acm_uart0`; boards
+// that include Zephyr's common cdc_acm_serial.dtsi (e.g. promicro_nrf52840) name
+// it `board_cdc_acm_uart` instead — accept either.
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(cdc_acm_uart0), okay)
 #include <zephyr/usb/usb_device.h>
 #define CMD_DEV DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0))
+#define HAVE_USB 1
+#elif DT_NODE_HAS_STATUS(DT_NODELABEL(board_cdc_acm_uart), okay)
+#include <zephyr/usb/usb_device.h>
+#define CMD_DEV DEVICE_DT_GET(DT_NODELABEL(board_cdc_acm_uart))
 #define HAVE_USB 1
 #else
 #define CMD_DEV NULL
@@ -266,6 +288,25 @@ static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name)
   *type = SKRIT_CTRL_IO;
   *name = OUT_NAME[idx];
 }
+
+#if HAVE_ADC
+static void hal_in_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
+  ARG_UNUSED(c);
+  if (idx >= DUTA_N_INPUTS) return;
+  *type = SKRIT_IN_ANALOG;
+  *name = "ADC (mV)";
+}
+static uint16_t hal_in_get(void *c, uint8_t idx) {
+  ARG_UNUSED(c);
+  if (idx >= DUTA_N_INPUTS) return 0;
+  int16_t raw = 0;
+  struct adc_sequence seq = {.buffer = &raw, .buffer_size = sizeof raw};
+  if (adc_sequence_init_dt(&adc_ch, &seq) != 0 || adc_read_dt(&adc_ch, &seq) != 0) return 0;
+  int32_t mv = raw;
+  if (adc_raw_to_millivolts_dt(&adc_ch, &mv) != 0) mv = raw; // unscaled fallback
+  return (uint16_t)(mv < 0 ? 0 : (mv > 0xFFFF ? 0xFFFF : mv));
+}
+#endif
 
 static void hal_serial_get(void *c, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop) {
   ARG_UNUSED(c);
@@ -335,7 +376,7 @@ static const skrit_hal HAL = {
     .macro_tier = SKRIT_TIER_INTERACTIVE,
     .store_kb = 0,
     .n_outputs = 3,
-    .n_inputs = 0,
+    .n_inputs = DUTA_N_INPUTS,
     .link_write = hal_link_write,
     .data_write = hal_data_write,
     .host_write = TRANSPORT_HOST_WRITE,
@@ -343,8 +384,13 @@ static const skrit_hal HAL = {
     .out_set = hal_out_set,
     .out_get = hal_out_get,
     .out_desc = hal_out_desc,
+#if HAVE_ADC
+    .in_desc = hal_in_desc,
+    .in_get = hal_in_get,
+#else
     .in_desc = NULL,
     .in_get = NULL,
+#endif
     .serial_get = hal_serial_get,
     .serial_set = hal_serial_set,
     .serial_signal = hal_serial_signal,
@@ -358,6 +404,9 @@ int main(void) {
     if (device_is_ready(out_gpio[i].port)) gpio_pin_configure_dt(&out_gpio[i], GPIO_OUTPUT_INACTIVE);
   if (device_is_ready(dtr_gpio.port)) gpio_pin_configure_dt(&dtr_gpio, GPIO_OUTPUT_INACTIVE);
   if (device_is_ready(rts_gpio.port)) gpio_pin_configure_dt(&rts_gpio, GPIO_OUTPUT_INACTIVE);
+#if HAVE_ADC
+  if (adc_is_ready_dt(&adc_ch)) adc_channel_setup_dt(&adc_ch);
+#endif
 
   skrit_dev_init(&dev, &HAL, NULL, /*muxed*/ TRANSPORT_MUXED);
   transport_start();
