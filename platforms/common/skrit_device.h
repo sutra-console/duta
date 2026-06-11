@@ -146,6 +146,12 @@ typedef struct skrit_hal {
   uint8_t (*config_get)(void *ctx, uint8_t index, uint8_t *type, int16_t *pin,
                         uint8_t *flags, uint16_t *arg, const char **name);
   uint8_t (*config_set)(void *ctx, const uint8_t *body, uint8_t len, uint8_t *bad_index);
+
+  // ---- key-value config (CFG_GET/CFG_SET; e.g. WiFi credentials). NULL = unsupported.
+  //   cfg_get: write key's value into out (cap bytes); return its length, -1 = unknown key
+  //   cfg_set: validate + persist value for key; returns a SKRIT_ST_* status
+  int16_t (*cfg_get)(void *ctx, uint8_t key, uint8_t *out, uint8_t cap);
+  uint8_t (*cfg_set)(void *ctx, uint8_t key, const uint8_t *val, uint8_t len);
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -264,15 +270,12 @@ static int skrit__cmp(uint16_t a, uint8_t op, uint16_t b) {
   return 0;
 }
 
-// Pump console + (if armed) feed the EXPECT matcher. Tees bytes to the host so
-// the human terminal stays live during a macro wait.
-static void skrit_dev_poll(skrit_dev *d) {
-  uint8_t buf[64];
-  if (!d->hal->data_read) return;
-  uint16_t got = d->hal->data_read(d->ctx, buf, sizeof buf);
+// Feed already-read target-console bytes into a device: tee to its host link
+// (auth-gated) and run the EXPECT matcher. Lets one physical UART read serve
+// SEVERAL links (e.g. USB + a WebSocket session) — read once, feed each dev.
+static void skrit_dev_feed_data(skrit_dev *d, const uint8_t *buf, uint16_t got) {
   if (!got) return;
-  if (skrit__gated(d)) return; // drained, but don't leak the console while unauthed
-  skrit__console_out(d, buf, got);
+  if (!skrit__gated(d)) skrit__console_out(d, buf, got); // don't leak while unauthed
   if (d->exp_pat && !d->exp_hit) {
     for (uint16_t i = 0; i < got; i++) {
       uint8_t c = buf[i];
@@ -283,6 +286,15 @@ static void skrit_dev_poll(skrit_dev *d) {
       }
     }
   }
+}
+
+// Pump console + (if armed) feed the EXPECT matcher. Tees bytes to the host so
+// the human terminal stays live during a macro wait.
+static void skrit_dev_poll(skrit_dev *d) {
+  uint8_t buf[64];
+  if (!d->hal->data_read) return;
+  uint16_t got = d->hal->data_read(d->ctx, buf, sizeof buf);
+  skrit_dev_feed_data(d, buf, got);
 }
 
 static void skrit__wait(skrit_dev *d, uint32_t until) {
@@ -753,9 +765,23 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
   case SKRIT_EE_WRITE:
     skrit__status(d, type, seq, SKRIT_ST_STORAGE);
     break;
-  case SKRIT_CFG_GET:
+  case SKRIT_CFG_GET: {
+    // key(1) -> status, key, value bytes (the HAL owns the key vocabulary)
+    if (!h->cfg_get) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = b[0];
+    int16_t vn = h->cfg_get(d->ctx, b[0], body + bl, (uint8_t)(SKRIT_MAX_BODY - bl));
+    if (vn < 0) { skrit__status(d, type, seq, SKRIT_ST_NOTFOUND); break; }
+    bl = (uint8_t)(bl + vn);
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
   case SKRIT_CFG_SET:
-    skrit__status(d, type, seq, SKRIT_ST_OK); // no keys defined yet; accept no-op
+    // key(1), value... -> status (HAL validates + persists)
+    if (!h->cfg_set) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    skrit__status(d, type, seq, h->cfg_set(d->ctx, b[0], b + 1, (uint8_t)(len - 1)));
     break;
 
   default:

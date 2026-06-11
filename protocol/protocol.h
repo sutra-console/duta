@@ -193,6 +193,25 @@ enum {
   SKRIT_DATA_I2C = 6,       // I2C transactions (first non-UART backend target)
 };
 
+// ---- CFG keys (CFG_GET: key -> value; CFG_SET: key + value) ----
+// Device-owned key/value config. The WiFi keys let a host provision the network
+// bridge over USB/BLE: set SSID + PASS, then poll STATUS while the device joins.
+enum {
+  SKRIT_CFG_WIFI_SSID = 0x10,   // rw: SSID string; set empty to forget the network
+  SKRIT_CFG_WIFI_PASS = 0x11,   // wo: password string; GET answers "*" when one is stored
+  SKRIT_CFG_WIFI_STATUS = 0x12, // ro: state(1) + detail string (IP / AP name / SSID)
+};
+// SKRIT_CFG_WIFI_STATUS state byte
+enum {
+  SKRIT_WIFI_OFF = 0,        // no credentials stored, radio idle
+  SKRIT_WIFI_CONNECTING = 1, // joining (detail = SSID)
+  SKRIT_WIFI_CONNECTED = 2,  // joined (detail = IP, e.g. "192.168.1.50")
+  SKRIT_WIFI_PORTAL = 3,     // captive-portal AP active (detail = AP name)
+  SKRIT_WIFI_FAILED = 4,     // join failed: bad credentials / not found (detail = SSID)
+};
+// Default port the device-side WebSocket bridge listens on (ws://<ip>:9555/).
+#define SKRIT_WS_PORT 9555
+
 // ---- pin capability bits (PIN_CAPS `caps` byte): what a pin's silicon can do.
 // The firmware mirrors these in duta_pincap.h (the per-mcu tables); the app reads
 // them to constrain the provisioning picker to valid roles for each pin.

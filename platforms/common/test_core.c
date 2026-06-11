@@ -44,6 +44,18 @@ static uint8_t m_authdef(void*c){(void)c;return g_default;}
 static const int16_t prov_pin[2]={4,48}; static const uint8_t prov_warn[2]={0,1};
 static const char* prov_name[2]={"","onboard WS2812"};
 static uint8_t prov_set_called=0, prov_reset=0;
+// mock key-value config: one rw "ssid" key + the masked wifi password
+static char cfg_ssid[33]="lab"; static uint8_t cfg_ssid_n=3, cfg_pass_stored=1;
+static int16_t m_kvget(void*c,uint8_t key,uint8_t*out,uint8_t cap){
+  (void)c;
+  if(key==SKRIT_CFG_WIFI_SSID){ if(cfg_ssid_n>cap)return -1; memcpy(out,cfg_ssid,cfg_ssid_n); return cfg_ssid_n; }
+  if(key==SKRIT_CFG_WIFI_PASS){ if(!cfg_pass_stored)return 0; out[0]='*'; return 1; }
+  return -1; }
+static uint8_t m_kvset(void*c,uint8_t key,const uint8_t*val,uint8_t n){
+  (void)c;
+  if(key==SKRIT_CFG_WIFI_SSID){ if(n>32)return SKRIT_ST_BADARGS; memcpy(cfg_ssid,val,n); cfg_ssid_n=n; return SKRIT_ST_OK; }
+  if(key==SKRIT_CFG_WIFI_PASS){ cfg_pass_stored=n>0; return SKRIT_ST_OK; }
+  return SKRIT_ST_NOTFOUND; }
 static uint8_t m_pincaps(void*c,uint8_t i,int16_t*pin,uint8_t*caps,uint8_t*warn,uint8_t*bus,const char**nm){
   (void)c; if(i<2){*pin=prov_pin[i];*caps=SKRIT_PINCAP_DIGITAL|SKRIT_PINCAP_PWM;*warn=prov_warn[i];*bus=SKRIT_NO_BUS;*nm=prov_name[i];} return 2;}
 static uint8_t m_cfgget(void*c,uint8_t i,uint8_t*t,int16_t*pin,uint8_t*fl,uint16_t*arg,const char**nm){
@@ -311,6 +323,46 @@ int main(void){
       assert(r[3] == SKRIT_ST_UNSUPPORTED); }
   }
   printf("provisioning PIN_CAPS/CONFIG_GET/SET ok\n");
+
+  // ---- CFG_GET/CFG_SET: key-value config (WiFi keys) ----
+  {
+    // base mock has no cfg callbacks -> UNSUPPORTED
+    skrit_dev ndev2; skrit_dev_init(&ndev2, &hal, NULL, 1);
+    { uint8_t a[1] = {SKRIT_CFG_WIFI_SSID}; link_n = 0; feed_cmd(&ndev2, SKRIT_CFG_GET, 1, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_UNSUPPORTED); }
+    skrit_hal khal = hal;
+    khal.cfg_get = m_kvget; khal.cfg_set = m_kvset;
+    skrit_dev kdev; skrit_dev_init(&kdev, &khal, NULL, 1);
+    // GET ssid -> "lab" (body: st, key, value...)
+    { uint8_t a[1] = {SKRIT_CFG_WIFI_SSID}; link_n = 0; feed_cmd(&kdev, SKRIT_CFG_GET, 2, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[4] == SKRIT_CFG_WIFI_SSID && r[5] == 'l' && r[6] == 'a' && r[7] == 'b'); }
+    // SET ssid -> stored
+    { uint8_t s[] = {SKRIT_CFG_WIFI_SSID, 'h', 'o', 'm', 'e'}; link_n = 0;
+      feed_cmd(&kdev, SKRIT_CFG_SET, 3, s, (uint8_t)sizeof s, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && cfg_ssid_n == 4 && cfg_ssid[0] == 'h'); }
+    // GET password -> masked "*", never the secret
+    { uint8_t a[1] = {SKRIT_CFG_WIFI_PASS}; link_n = 0; feed_cmd(&kdev, SKRIT_CFG_GET, 4, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[5] == '*' && r[2] == 3); }
+    // unknown key -> NOTFOUND
+    { uint8_t a[1] = {0x77}; link_n = 0; feed_cmd(&kdev, SKRIT_CFG_GET, 5, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_NOTFOUND); }
+  }
+  printf("CFG get/set (wifi keys) ok\n");
+
+  // ---- skrit_dev_feed_data: one read tees to several links ----
+  {
+    skrit_dev d1, d2;
+    skrit_dev_init(&d1, &hal, NULL, 1);
+    skrit_dev_init(&d2, &hal, NULL, 1);
+    link_n = 0;
+    skrit_dev_feed_data(&d1, (const uint8_t *)"hi", 2);
+    skrit_dev_feed_data(&d2, (const uint8_t *)"hi", 2);
+    // both wrapped the bytes onto the (shared mock) link as DATA frames
+    int end = link_n; int frames = 0;
+    for (int i = 0; i < end; i++) if (link_out[i] == 0) frames++; // delimiters
+    assert(link_n > 0 && frames >= 2);
+  }
+  printf("feed_data multi-link tee ok\n");
 
   printf("ALL CORE TESTS PASSED\n");
   return 0;
