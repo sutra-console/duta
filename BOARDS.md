@@ -9,7 +9,7 @@ from it) and the fourth *chooses* from what's left:
 | **platform** | `platforms/<platform>/` | the toolchain/framework (build reality): `ch55xduino`, `espressif`, `pico`, `zephyr`, `host` |
 | **mcu** | `src/mcu/<chip>.h` | **silicon truth**: the full pin inventory, each pin's intrinsic caps, and an immutable hazard status (`FREE`/`CAUTION`/`FORBIDDEN`), written **once per chip** |
 | **board** *(vendored)* | `src/boards/<vendor>/<board>.h` | **facts about the physical board, nothing else**: which mcu it carries, which pins are broken out, what's wired onboard (`FIXED`/`DUAL` uses), `BOARD_VENDOR` + `BOARD_MODEL` |
-| **target** *(ours)* | `src/targets/duta_<board>.h` | **our choices**: which vendored board we build on, the Duta role pins (DATA UART, relays, LED, RGB, DTR/RTS), `BOARD_NAME`, and the compiled-default `duta_outputs[]` |
+| **target** *(ours)* | `src/targets/duta_<board>.h` | **our choices**: which vendored board we build on, the Duta role pins (DATA UART, the onboard status `LED_PIN`/`RGB_PIN`, DTR/RTS), `BOARD_NAME`, and the compiled-default `duta_outputs[]` |
 
 The split matters: *"relay on GPIO4" is not a fact about a DevKitC, it's a fact
 about our wiring.* Vendored board headers must stay accurate to the actual product
@@ -46,9 +46,13 @@ flag (set per env in `platformio.ini`) to a target.
   ```
 
 - **`targets/duta_<board>.h`**: `#include "../boards/<vendor>/<board>.h"`, then our
-  role pins (`DATA_TX/RX`, `RELAY1/2`, `LED`, `RGB`, `DTR/RTS`) + `BOARD_NAME`, ending
-  with `#include "duta_board_io.h"` to build the default `duta_outputs[]` table. A
-  target with a non-standard IO set declares `duta_outputs[]` itself instead.
+  role pins (`DATA_TX/RX`, the onboard `LED_PIN`/`RGB_PIN`, `DTR/RTS`) + `BOARD_NAME`,
+  ending with `#include "duta_board_io.h"` to build the default `duta_outputs[]` table.
+  That default is **the board's onboard signal hardware only** (status LED and/or RGB);
+  each row is emitted only if its pin is defined, so a board with neither (the bare XIAO
+  ESP32-C3) gets an empty table. Relays and other external fixtures are **not** a
+  compiled default — they're added at runtime via provisioning (`CONFIG_WRITE`). A target
+  with a non-standard built-in set declares `duta_outputs[]` itself instead.
 
 ## Provisioning semantics (mcu ∩ board)
 

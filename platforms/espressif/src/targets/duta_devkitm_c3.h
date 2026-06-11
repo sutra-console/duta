@@ -9,10 +9,7 @@
 // ---- Duta role pins (our wiring) -------------------------------------------
 #define DATA_TX_PIN 21
 #define DATA_RX_PIN 20
-#define RELAY1_PIN 4
-#define RELAY2_PIN 5
-#define LED_PIN 6 // external aux LED
-#define RGB_PIN ONBOARD_WS2812_PIN
+#define RGB_PIN ONBOARD_WS2812_PIN // onboard addressable LED (the default output)
 #define RGB_COUNT 1
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)

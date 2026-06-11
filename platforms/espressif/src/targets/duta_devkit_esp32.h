@@ -9,9 +9,7 @@
 // ---- Duta role pins (our wiring) -------------------------------------------
 #define DATA_TX_PIN 17
 #define DATA_RX_PIN 16
-#define RELAY1_PIN 25
-#define RELAY2_PIN 26
-#define LED_PIN ONBOARD_LED_PIN // reuse the onboard blue LED (GPIO2, dual-use)
+#define LED_PIN ONBOARD_LED_PIN // the onboard blue LED (GPIO2, dual-use) — default output
 #define RGB_PIN (-1)            // no addressable LED on this board
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)

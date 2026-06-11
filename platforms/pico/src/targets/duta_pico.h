@@ -10,9 +10,7 @@
 // ---- Duta role pins (our wiring) -------------------------------------------
 #define DATA_TX_PIN 0 // GP0, UART0 TX to the target console
 #define DATA_RX_PIN 1 // GP1, UART0 RX
-#define RELAY1_PIN 2  // external relay modules on free GPIOs
-#define RELAY2_PIN 3
-#define LED_PIN ONBOARD_LED_PIN // GP25: fixed onboard LED (not provisionable)
+#define LED_PIN ONBOARD_LED_PIN // GP25: onboard LED — the default output
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)
 

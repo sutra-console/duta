@@ -1,7 +1,8 @@
 // targets/duta_s3_zero.h: OUR Duta build on the Waveshare ESP32-S3-Zero.
 // The mux link rides the native USB-C, which leaves the board's silkscreened
 // TX/RX (UART0, GP43/44) free, so they ARE the DATA console bridge: wire the
-// target straight to the labeled pins. Relays/LED go on free side-header GPIOs.
+// target straight to the labeled pins. Default output is the onboard RGB only;
+// relays / external fixtures are added at runtime (Configure Device).
 #ifndef DUTA_TARGET_S3_ZERO_H
 #define DUTA_TARGET_S3_ZERO_H
 
@@ -12,10 +13,7 @@
 // ---- Duta role pins (our wiring) -------------------------------------------
 #define DATA_TX_PIN 43 // the side-header pin silkscreened "TX" (GP43)
 #define DATA_RX_PIN 44 // the side-header pin silkscreened "RX" (GP44)
-#define RELAY1_PIN 4   // external relay modules on free GPIOs
-#define RELAY2_PIN 5
-#define LED_PIN 6 // external aux LED (no plain onboard LED)
-#define RGB_PIN ONBOARD_WS2812_PIN // fixed GP21: always the RGB
+#define RGB_PIN ONBOARD_WS2812_PIN // fixed GP21: always the RGB (onboard)
 #define RGB_ORDER ONBOARD_WS2812_ORDER
 #define RGB_COUNT 1
 #define DTR_PIN (-1)

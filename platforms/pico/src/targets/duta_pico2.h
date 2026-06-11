@@ -9,9 +9,7 @@
 // ---- Duta role pins (our wiring) -------------------------------------------
 #define DATA_TX_PIN 0
 #define DATA_RX_PIN 1
-#define RELAY1_PIN 2
-#define RELAY2_PIN 3
-#define LED_PIN ONBOARD_LED_PIN
+#define LED_PIN ONBOARD_LED_PIN // onboard LED — the default output
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)
 

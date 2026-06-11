@@ -1,11 +1,15 @@
-// duta_board_io.h: builds the standard duta_outputs[] table from a board's role
-// macros, so each leaf board header only declares pins, not the table boilerplate.
+// duta_board_io.h: builds the default duta_outputs[] table from a board's
+// ONBOARD signal hardware, so each leaf board header only declares pins.
 // ============================================================================
-// A board header defines RELAY1_PIN / RELAY2_PIN / LED_PIN (and optionally
-// RGB_PIN / RGB_COUNT, RELAY_ACTIVE_LOW, LED_ACTIVE_LOW), then includes this.
-// The table is the *compiled default*; runtime provisioning may replace it.
-// A board with a non-standard IO set can skip this and declare duta_outputs[]
-// itself (the shared Arduino driver only requires the array to exist).
+// The compiled default is the board's own onboard outputs and nothing else: a
+// status LED (LED_PIN) and/or an addressable RGB (RGB_PIN). A target designates
+// those by defining the pin; each row is emitted only if its pin is defined, so
+// a board with neither (e.g. the bare XIAO ESP32-C3) gets an empty table.
+//
+// Relays and other EXTERNAL fixtures are deliberately NOT a compiled default —
+// they're a runtime choice: the duta_io[] table is mutable, and the host adds
+// them with CONFIG_WRITE (Configure Device). A target wanting a different
+// built-in set declares duta_outputs[] itself instead of including this.
 // ============================================================================
 #ifndef DUTA_BOARD_IO_H
 #define DUTA_BOARD_IO_H
@@ -13,9 +17,6 @@
 #include "duta_io.h"  // duta_io descriptor + DUTA_ACTIVE_LOW
 #include "protocol.h" // SKRIT_CTRL_*
 
-#ifndef RELAY_ACTIVE_LOW
-#define RELAY_ACTIVE_LOW 0
-#endif
 #ifndef LED_ACTIVE_LOW
 #define LED_ACTIVE_LOW 0
 #endif
@@ -35,9 +36,9 @@
 #endif
 
 static const duta_io duta_outputs[] = {
-    {SKRIT_CTRL_IO, RELAY1_PIN, "Relay 1", RELAY_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
-    {SKRIT_CTRL_IO, RELAY2_PIN, "Relay 2", RELAY_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
-    {SKRIT_CTRL_PWM, LED_PIN, "Aux LED", LED_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+#if defined(LED_PIN) && (LED_PIN) >= 0
+    {SKRIT_CTRL_PWM, LED_PIN, "Status LED", LED_ACTIVE_LOW ? DUTA_ACTIVE_LOW : 0, 0},
+#endif
 #if RGB_PIN >= 0
     {SKRIT_CTRL_RGB, RGB_PIN, "RGB LED", 0, RGB_COUNT},
 #endif

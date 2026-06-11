@@ -12,10 +12,7 @@
 // ---- Duta role pins (our wiring) -------------------------------------------
 #define DATA_TX_PIN 17 // target-console UART
 #define DATA_RX_PIN 18
-#define RELAY1_PIN 4 // external relay modules on free GPIOs
-#define RELAY2_PIN 5
-#define LED_PIN 2 // external aux LED (the DevKitC has no plain onboard LED)
-#define RGB_PIN ONBOARD_WS2812_PIN
+#define RGB_PIN ONBOARD_WS2812_PIN // onboard addressable LED (the default output)
 #define RGB_COUNT 1
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)
