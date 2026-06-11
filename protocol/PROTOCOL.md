@@ -303,7 +303,20 @@ no need to mux. The two roles map to two **GATT services**, and **`caps.muxed` i
 the DATA service's sibling.) The host subscribes to both TX characteristics (CCC), writes console
 keystrokes to DATA-RX and CMD frames to CMD-RX. A frame larger than the negotiated ATT
 MTU (minus 3) is split across notifications and reassembled by the `0x00` delimiters; BLE
-adds no framing of its own. Pair/bond per your security needs.
+adds no framing of its own.
+
+**Security.** The **RX (write) and CCC (subscribe) attributes require an encrypted link**,
+so a central must complete **LE Secure Connections** pairing (ECDH P-256) before it can
+drive the device or receive notifications — the air link is never plaintext. A device with
+no display/keyboard uses **Just Works** pairing (encrypted, passively secure under LESC);
+one with input could raise this to passkey/numeric-compare. Bonds are persisted, so a paired
+host reconnects without re-pairing. This is the BLE equivalent of a network transport's
+`AUTH`: physical/link-layer access *is* the credential, so `INFO.flags AUTH_REQUIRED` stays 0.
+
+**Naming.** The device advertises a per-unit name `Duta-XXXX` (from its BLE address) plus
+the skrit CMD UUID in the scan response, so multiple Dutas are distinguishable and a central
+can filter by the CMD service. **Backpressure:** device→host notifications are queued and
+drained as controller buffers free, so a console/CMD burst is never dropped mid-frame.
 
 > Discovery: the app scans for the **CMD service UUID** (the skrit identifier) and a
 > `Duta`-prefixed name. nRF52840 is the reference (Zephyr + the in-tree BT stack); see
