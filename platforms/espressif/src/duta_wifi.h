@@ -19,6 +19,7 @@
 #define DUTA_WIFI_H
 
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
@@ -316,6 +317,18 @@ static void duta_wifi_loop(void) {
     if (WiFi.status() == WL_CONNECTED) {
       wifi_state = SKRIT_WIFI_CONNECTED;
       ws_server.begin();
+      // Advertise for auto-discovery: hosts browse _skrit._tcp and get the
+      // name + port without anyone typing an IP. Hostname = duta-xxxx.local.
+      {
+        uint64_t mac = ESP.getEfuseMac();
+        char host[16];
+        snprintf(host, sizeof host, "duta-%02x%02x", (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+        if (MDNS.begin(host)) {
+          MDNS.addService("skrit", "tcp", SKRIT_WS_PORT);
+          MDNS.addServiceTxt("skrit", "tcp", "name", BOARD_NAME);
+          MDNS.addServiceTxt("skrit", "tcp", "vendor", BOARD_VENDOR);
+        }
+      }
     } else if (millis() - wifi_join_t0 > 20000) {
       wifi_state = SKRIT_WIFI_FAILED;
       portal_start(); // fall back to the portal so the device is reachable
@@ -323,6 +336,7 @@ static void duta_wifi_loop(void) {
     break;
   case SKRIT_WIFI_CONNECTED:
     if (WiFi.status() != WL_CONNECTED) { // dropped — rejoin
+      MDNS.end();
       ws_drop_client();
       wifi_join();
       break;
