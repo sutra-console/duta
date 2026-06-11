@@ -37,6 +37,16 @@ targets:
     env: esp32
     transport: usb-mux
 
+  - platform: espressif
+    board: seeed_xiao_esp32s3
+    env: xiaos3
+    transport: usb-mux
+
+  - platform: espressif
+    board: seeed_xiao_esp32c3
+    env: xiaoc3
+    transport: usb-mux
+
   - platform: pico
     board: rpipico
     env: pico
@@ -45,6 +55,11 @@ targets:
   - platform: pico
     board: rpipico2
     env: pico2
+    transport: usb-mux
+
+  - platform: pico
+    board: seeed_xiao_rp2040
+    env: xiaorp2040
     transport: usb-mux
 
   - platform: zephyr
@@ -57,6 +72,10 @@ targets:
 
   - platform: zephyr
     board: promicro_nrf52840/nrf52840 # nice!nano v2 / SuperMini clones
+    transport: usb-mux
+
+  - platform: zephyr
+    board: xiao_ble/nrf52840 # Seeed XIAO nRF52840 (and Sense)
     transport: usb-mux
 
   - platform: zephyr

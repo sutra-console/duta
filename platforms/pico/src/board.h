@@ -5,7 +5,7 @@
 // build on a specific vendored board. Default is the Raspberry Pi Pico (RP2040).
 // See BOARDS.md for the platform → mcu → board → target layering.
 
-#if !defined(BOARD_PICO) && !defined(BOARD_PICO2)
+#if !defined(BOARD_PICO) && !defined(BOARD_PICO2) && !defined(BOARD_XIAO_RP2040)
 #define BOARD_PICO
 #endif
 
@@ -13,10 +13,12 @@
 #include "targets/duta_pico.h"
 #elif defined(BOARD_PICO2)
 #include "targets/duta_pico2.h"
+#elif defined(BOARD_XIAO_RP2040)
+#include "targets/duta_xiao_rp2040.h"
 #endif
 
 #ifndef BOARD_NAME
-#error "No target selected: define BOARD_PICO / BOARD_PICO2 (see platformio.ini)."
+#error "No target selected: define BOARD_PICO / BOARD_PICO2 / BOARD_XIAO_RP2040 (see platformio.ini)."
 #endif
 
 #endif // DUTA_PICO_BOARD_H

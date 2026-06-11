@@ -7,7 +7,7 @@
 // layering (vendored boards are facts; targets assign the Duta roles).
 
 #if !defined(BOARD_ESP32S3) && !defined(BOARD_ESP32C3) && !defined(BOARD_ESP32) && \
-    !defined(BOARD_S3_ZERO)
+    !defined(BOARD_S3_ZERO) && !defined(BOARD_XIAO_S3) && !defined(BOARD_XIAO_C3)
 #define BOARD_ESP32S3
 #endif
 
@@ -15,14 +15,18 @@
 #include "targets/duta_devkitc_s3.h"
 #elif defined(BOARD_S3_ZERO)
 #include "targets/duta_s3_zero.h"
+#elif defined(BOARD_XIAO_S3)
+#include "targets/duta_xiao_esp32s3.h"
 #elif defined(BOARD_ESP32C3)
 #include "targets/duta_devkitm_c3.h"
+#elif defined(BOARD_XIAO_C3)
+#include "targets/duta_xiao_esp32c3.h"
 #elif defined(BOARD_ESP32)
 #include "targets/duta_devkit_esp32.h"
 #endif
 
 #ifndef BOARD_NAME
-#error "No target selected: define BOARD_ESP32S3 / BOARD_S3_ZERO / BOARD_ESP32C3 / BOARD_ESP32 (see platformio.ini)."
+#error "No target selected: define BOARD_ESP32S3 / BOARD_S3_ZERO / BOARD_XIAO_S3 / BOARD_ESP32C3 / BOARD_XIAO_C3 / BOARD_ESP32 (see platformio.ini)."
 #endif
 
 #endif // DUTA_ESP_BOARD_H

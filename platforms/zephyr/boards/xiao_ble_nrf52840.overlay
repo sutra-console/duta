@@ -1,0 +1,69 @@
+// Seeed XIAO nRF52840 (Zephyr board xiao_ble). Board facts come from the upstream
+// Zephyr board: uart0 is routed to the silkscreened TX/RX pads (D6 P1.11 / D7
+// P1.12), there's a USB device controller (zephyr_udc0), and an onboard RGB user
+// LED (led0 red P0.26, led1 green P0.30, led2 blue P0.06; active low).
+// This overlay adds OUR Duta wiring:
+//   * CMD + DATA mux   -> a CDC ACM port on the USB device controller.
+//   * DATA console      -> uart0 (the D6/D7 pads).
+//   * Aux LED           -> led0 (the onboard red user LED).
+//   * Relay 1 / Relay 2 -> P0.02 / P0.03 (D0/D1 pads). Our default wiring; verify
+//     against your board's exposed pads and rewire as needed.
+// The board already defines led0/led1/led2 (its RGB user LED). We re-alias
+// led1/led2 to our relays (main.c maps led1 -> Relay 1, led2 -> Relay 2), so the
+// green/blue channels are unused; led0 (red) stays the aux LED.
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+
+/ {
+	aliases {
+		duta-data = &uart0; // led0 (aux LED) is already aliased by the board
+		led1 = &relay1;     // main.c maps led1 -> Relay 1
+		led2 = &relay2;     //               led2 -> Relay 2
+	};
+
+	duta_relays {
+		compatible = "gpio-leds";
+		relay1: relay_1 {
+			gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>; // P0.02 (D0)
+			label = "Relay 1";
+		};
+		relay2: relay_2 {
+			gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>; // P0.03 (D1)
+			label = "Relay 2";
+		};
+	};
+
+	// ADC input (skrit input 0): the nRF52840's internal VDD (mV) — no pin
+	// needed, verifiable over USB. Point at an &adc channel for an external pad.
+	zephyr,user {
+		io-channels = <&adc 0>;
+	};
+};
+
+// The CDC ACM that carries the mux link (main.c looks for cdc_acm_uart0).
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
+
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,input-positive = <NRF_SAADC_VDD>;
+		zephyr,resolution = <12>;
+	};
+};

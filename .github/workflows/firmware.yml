@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        env: [esp32s3, s3zero, esp32c3, esp32]
+        env: [esp32s3, s3zero, xiaos3, esp32c3, xiaoc3, esp32]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        env: [pico, pico2]
+        env: [pico, pico2, xiaorp2040]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        board: [native_sim, nrf52840dk/nrf52840, promicro_nrf52840/nrf52840]
+        board: [native_sim, nrf52840dk/nrf52840, promicro_nrf52840/nrf52840, xiao_ble/nrf52840]
     steps:
       - uses: actions/checkout@v5
         with:
