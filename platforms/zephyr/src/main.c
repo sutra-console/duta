@@ -366,15 +366,21 @@ static void hal_serial_signal(void *c, uint8_t mask, uint8_t value) {
   // BREAK on a hardware UART has no portable Zephyr API; left to a board hook.
 }
 
-#if defined(CONFIG_SOC_SERIES_NRF52X)
-#include <hal/nrf_power.h>
+// The Zephyr SoC-series symbol for the nRF52 family is CONFIG_SOC_SERIES_NRF52
+// (NOT ..._NRF52X — that name does not exist here). Guarding on the wrong symbol
+// silently compiled this block out, so REBOOT mode=1 only did an app reset.
+#if defined(CONFIG_SOC_SERIES_NRF52) || defined(CONFIG_SOC_SERIES_NRF52X)
+#include <hal/nrf_power.h> // brings in the MDK: NRF_POWER + GPREGRET
+#define DUTA_HAVE_NRF_DFU_REBOOT 1
 #endif
 static void hal_reboot(void *c, uint8_t mode) {
   ARG_UNUSED(c);
-#if defined(CONFIG_SOC_SERIES_NRF52X)
+#if defined(DUTA_HAVE_NRF_DFU_REBOOT)
   if (mode == SKRIT_REBOOT_BOOTLOADER) {
     // 0x57 = the Adafruit/UF2 nRF52 bootloader's "enter DFU" magic in GPREGRET.
-    nrf_power_gpregret_set(NRF_POWER, 0x57);
+    // Write the register directly — the nrfx hal's gpregret setter signature has
+    // churned (2-arg vs 3-arg w/ reg_num); the register write is version-proof.
+    NRF_POWER->GPREGRET = 0x57;
   }
 #else
   ARG_UNUSED(mode);
