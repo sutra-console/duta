@@ -41,9 +41,13 @@ static skrit_dev ws_dev;
 static skrit_hal WS_HAL; // copy of the board HAL with link/auth overrides
 static WiFiServer ws_server(SKRIT_WS_PORT);
 static WiFiClient ws_client;
+static bool ws_active = false; // OUR liveness flag — WiFiClient's bool IS connected(),
+                               // so it can't be used to detect "had a session, lost it"
 static bool ws_handshaken = false;
 static uint8_t ws_rx[DUTA_WS_RX_CAP];
 static size_t ws_rx_n = 0;
+static WiFiClient ws_pending; // accepted, hasn't proven itself with data yet
+static uint32_t ws_pending_t0;
 
 // ---- NVS helpers (namespace "duta": wssid / wpass / pw) ---------------------
 static void wifi_load_creds(void) {
@@ -93,6 +97,8 @@ static void ws_link_write(void *, const uint8_t *p, uint16_t n) {
 
 static void ws_drop_client(void) {
   if (ws_client) ws_client.stop();
+  ws_client = WiFiClient();
+  ws_active = false;
   ws_handshaken = false;
   ws_rx_n = 0;
   skrit_dev_reset_auth(&ws_dev); // next session must AUTH again
@@ -227,13 +233,34 @@ static uint8_t duta_wifi_cfg_set(uint8_t key, const uint8_t *val, uint8_t len) {
 
 // ---- WebSocket server pump ----------------------------------------------------
 static void ws_pump(void) {
-  // accept one client at a time
-  if (!ws_client || !ws_client.connected()) {
-    if (ws_client) ws_drop_client();
-    WiFiClient incoming = ws_server.accept();
-    if (incoming) ws_client = incoming;
+  // ALWAYS drain the accept queue — an abruptly-dropped client can look
+  // "connected" in lwip indefinitely, and gating accept on it wedges the
+  // server. But takeover must not thrash: a newcomer sits in a PENDING slot
+  // and only displaces the active session once it actually sends bytes (its
+  // HTTP upgrade). Junk probes / dead backlog entries never kick anyone; a
+  // real reconnect wins immediately (and still has to AUTH).
+  WiFiClient incoming = ws_server.accept();
+  if (incoming) {
+    if (ws_pending) ws_pending.stop();
+    ws_pending = incoming;
+    ws_pending_t0 = millis();
   }
-  if (!ws_client || !ws_client.connected()) return;
+  if (ws_pending) {
+    if (!ws_pending.connected()) {
+      ws_pending = WiFiClient(); // probe went away
+    } else if (ws_pending.available()) { // real client: take over the session
+      ws_drop_client(); // ALWAYS reset session state (handshake flag, auth, buffer)
+      ws_client = ws_pending;
+      ws_active = true;
+      ws_pending = WiFiClient();
+    } else if (millis() - ws_pending_t0 > 3000) {
+      ws_pending.stop();
+      ws_pending = WiFiClient();
+    }
+  }
+  // ws_client's own bool == connected(), so test OUR flag to catch a dead session
+  if (ws_active && !ws_client.connected()) ws_drop_client();
+  if (!ws_active) return;
 
   while (ws_client.available() && ws_rx_n < sizeof ws_rx) {
     ws_rx[ws_rx_n++] = (uint8_t)ws_client.read();
