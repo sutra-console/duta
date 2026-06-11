@@ -10,8 +10,10 @@
 #define BOARD_VENDOR "Waveshare"
 #define BOARD_MODEL "ESP32-S3-Zero"
 
-// Breakout: GP1-GP13 + TX/RX (GP43/44) on the side headers; GP14-GP18 and
-// GP38-GP42 + GP45 on the bottom castellated pads. GP33-37 are not exposed.
+// Breakout: GP1-GP13 plus two pins silkscreened "TX" and "RX" (those ARE
+// GP43/44 — UART0; the label hides the GPIO number) on the side headers;
+// GP14-GP18, GP38-GP42 and GP45 on the bottom castellated pads. GP33-37 are
+// not exposed.
 static const int16_t duta_board_broken_out[] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
     38, 39, 40, 41, 42, 43, 44, 45,

@@ -10,8 +10,8 @@
 #define BOARD_NAME "Duta S3-Zero"
 
 // ---- Duta role pins (our wiring) -------------------------------------------
-#define DATA_TX_PIN 43 // the board's "TX" pin
-#define DATA_RX_PIN 44 // the board's "RX" pin
+#define DATA_TX_PIN 43 // the side-header pin silkscreened "TX" (GP43)
+#define DATA_RX_PIN 44 // the side-header pin silkscreened "RX" (GP44)
 #define RELAY1_PIN 4   // external relay modules on free GPIOs
 #define RELAY2_PIN 5
 #define LED_PIN 6 // external aux LED (no plain onboard LED)
