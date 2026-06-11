@@ -194,13 +194,20 @@ enum {
   SKRIT_DATA_CAN = 1,       // CAN frames
   SKRIT_DATA_RS485 = 2,     // RS-485
   SKRIT_DATA_SPI = 3,       // SPI
-  SKRIT_DATA_BLE_SNIFF = 4, // sniffed BLE packets
-  SKRIT_DATA_LOGIC = 5,     // logic-analyzer samples
-  SKRIT_DATA_I2C = 6,       // I2C transactions (the first non-UART backend)
+  SKRIT_DATA_BLE_SNIFF = 4,   // sniffed BLE packets
+  SKRIT_DATA_LOGIC = 5,       // logic-analyzer samples
+  SKRIT_DATA_I2C = 6,         // I2C transactions (the first non-UART backend)
+  SKRIT_DATA_IEEE802154 = 7,  // sniffed IEEE 802.15.4 frames (Zigbee / Thread)
 // i2c DATA records (kind = SKRIT_DATA_I2C): one mux DATA frame carries exactly
 // ONE record — the mux framing IS the record framing:
 //   ts_ms(4 LE) · addr(1) · flags(1) · wlen(1) · w-bytes · rlen(1) · r-bytes
 //   flags: bit0 = transfer included a read phase · bit1 = NAK / failed
+//
+// ieee802154 DATA records (kind = SKRIT_DATA_IEEE802154): one mux frame = one
+// captured 802.15.4 frame (the radio handles O-QPSK + 16-bit FCS in hardware):
+//   ts_ms(4 LE) · channel(1, 11..26) · rssi(1, signed dBm) · lqi(1) ·
+//     flags(1) · psdu_len(1) · psdu…
+//   flags: bit0 = FCS ok.  psdu is the MAC frame INCLUDING the 2-byte FCS.
 };
 
 // ---- CFG keys (CFG_GET: key -> value; CFG_SET: key + value) ----

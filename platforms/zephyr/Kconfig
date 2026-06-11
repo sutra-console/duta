@@ -1,12 +1,23 @@
 # Duta zephyr app options.
 config DUTA_SNIFF
 	bool "Build the BLE advertising sniffer variant"
-	depends on !BT
+	depends on !BT && !DUTA_SNIFF_154
 	help
 	  Replace the UART DATA bridge with a raw-radio BLE advertising sniffer
 	  (nRF only). The radio is driven directly — incompatible with the BLE
 	  controller (BT) — to capture advertising PDUs on channels 37/38/39. DATA
 	  becomes a stream of captured-packet records (kind = ble-sniff). Select via
 	  `-DEXTRA_CONF_FILE=overlay-sniff.conf`.
+
+config DUTA_SNIFF_154
+	bool "Build the IEEE 802.15.4 (Zigbee/Thread) sniffer variant"
+	depends on !BT
+	help
+	  Replace the UART DATA bridge with a raw-radio IEEE 802.15.4 sniffer (nRF
+	  only). The radio is driven directly in its 802.15.4 mode to capture frames
+	  on channels 11-26 (Zigbee and Thread share this PHY/MAC). DATA becomes a
+	  stream of captured-frame records (kind = ieee802154). One radio, so this is
+	  mutually exclusive with the BLE sniffer. Select via
+	  `-DEXTRA_CONF_FILE=overlay-sniff154.conf`.
 
 source "Kconfig.zephyr"

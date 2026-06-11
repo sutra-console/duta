@@ -25,13 +25,39 @@
 #include <zephyr/sys/reboot.h>
 #endif
 
+// The 802.15.4 sniffer streams whole MAC frames (up to 127 B) as one DATA record
+// (~137 B); raise the device send-buffer cap so each rides a single mux frame.
+#if defined(CONFIG_DUTA_SNIFF_154)
+#define SKRIT_SEND_CAP 200
+#endif
 #include "skrit_device.h"
-#ifdef CONFIG_DUTA_SNIFF
-#include "duta_ble_sniff.h"
-#define SNIFF_OUT_IDX 3     // a virtual "Sniffing" output (start/stop) past the 3 gpios
+// Sniffer variants drive the nRF radio directly and replace the UART DATA bridge
+// with captured radio frames. One backend at a time, selected at build time; both
+// expose the same sniff_* surface so the loop below is backend-agnostic.
+#if defined(CONFIG_DUTA_SNIFF) || defined(CONFIG_DUTA_SNIFF_154)
+#define DUTA_SNIFFER 1
+#define SNIFF_OUT_IDX 3 // a virtual "Sniffing" output (start/stop) past the 3 gpios
 #define DUTA_N_OUTPUTS 4
 #else
 #define DUTA_N_OUTPUTS 3
+#endif
+
+#ifdef CONFIG_DUTA_SNIFF
+#include "duta_ble_sniff.h"
+#define SNIFF_KIND SKRIT_DATA_BLE_SNIFF
+#define sniff_init duta_sniff_init
+#define sniff_start duta_sniff_start
+#define sniff_stop duta_sniff_stop
+#define sniff_is_on duta_sniff_is_on
+#define sniff_take duta_sniff_take
+#elif defined(CONFIG_DUTA_SNIFF_154)
+#include "duta_154_sniff.h"
+#define SNIFF_KIND SKRIT_DATA_IEEE802154
+#define sniff_init duta_154_sniff_init
+#define sniff_start duta_154_sniff_start
+#define sniff_stop duta_154_sniff_stop
+#define sniff_is_on duta_154_sniff_is_on
+#define sniff_take duta_154_sniff_take
 #endif
 
 #define FW_LO 0x04
@@ -281,10 +307,10 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
 
 static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
   ARG_UNUSED(c);
-#ifdef CONFIG_DUTA_SNIFF
+#ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) { // virtual "Sniffing" toggle drives the radio
-    if (on) duta_sniff_start();
-    else duta_sniff_stop();
+    if (on) sniff_start();
+    else sniff_stop();
     return;
   }
 #endif
@@ -294,14 +320,14 @@ static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
 }
 static uint8_t hal_out_get(void *c, uint8_t idx) {
   ARG_UNUSED(c);
-#ifdef CONFIG_DUTA_SNIFF
-  if (idx == SNIFF_OUT_IDX) return duta_sniff_is_on() ? 1 : 0;
+#ifdef DUTA_SNIFFER
+  if (idx == SNIFF_OUT_IDX) return sniff_is_on() ? 1 : 0;
 #endif
   return idx < 3 ? g_out[idx] : 0;
 }
 static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
   ARG_UNUSED(c);
-#ifdef CONFIG_DUTA_SNIFF
+#ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) {
     *type = SKRIT_CTRL_IO;
     *name = "Sniffing";
@@ -402,8 +428,8 @@ static void hal_pump(void *c) {
 static const skrit_hal HAL = {
     .name = "Duta nRF52840",
     .fw_ver = (FW_HI << 8) | FW_LO,
-#ifdef CONFIG_DUTA_SNIFF
-    .data_kind = SKRIT_DATA_BLE_SNIFF, // DATA is captured adv PDUs, not a UART console
+#ifdef DUTA_SNIFFER
+    .data_kind = SNIFF_KIND, // DATA is captured radio frames, not a UART console
 #endif
     .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
@@ -457,16 +483,17 @@ int main(void) {
     printk("Duta zephyr build-check (no transport). PING=0x%02x\n", SKRIT_PING);
     return 0;
   }
-#ifdef CONFIG_DUTA_SNIFF
-  // BLE sniffer: DATA is captured advertising PDUs (no UART). Poll the radio and
-  // emit each packet as a DATA record; CMD still works over the same mux link.
+#ifdef DUTA_SNIFFER
+  // Sniffer build: DATA is captured radio frames (no UART). Poll the radio and
+  // emit each frame as a DATA record; CMD still works over the same mux link.
   // The "Sniffing" virtual output (index 3) starts/stops capture; default on.
-  duta_sniff_init();
-  duta_sniff_start();
+  // rec must hold the largest record: 802.15.4 is 9 + up-to-127-byte PSDU.
+  sniff_init();
+  sniff_start();
+  static uint8_t rec[160]; // static: keep the 802.15.4-sized record off the stack
   for (;;) {
-    uint8_t rec[64];
     uint16_t n;
-    while ((n = duta_sniff_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
+    while ((n = sniff_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
     unsigned char b;
     while (uart_poll_in(cmd_dev, &b) == 0) skrit_dev_rx(&dev, (uint8_t)b);
     k_yield();

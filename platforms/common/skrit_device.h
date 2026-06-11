@@ -49,6 +49,14 @@ extern "C" {
 #ifndef SKRIT_MUX_CHUNK
 #define SKRIT_MUX_CHUNK 240
 #endif
+// Largest payload skrit__send can frame in one go: a CMD frame, or a mux DATA
+// chunk (which carries a whole typed record — e.g. a 137-byte 802.15.4 frame).
+// Defaults to the CMD-frame size so constrained platforms (CH55x) stay small; a
+// platform that streams big DATA records raises it (the nRF 802.15.4 sniffer
+// defines SKRIT_SEND_CAP before including this header).
+#ifndef SKRIT_SEND_CAP
+#define SKRIT_SEND_CAP SKRIT_RX_CAP
+#endif
 #ifndef SKRIT_ENABLE_ASCII
 #define SKRIT_ENABLE_ASCII 1 // hand-terminal line mode (PING/ID/STATUS/HELP)
 #endif
@@ -207,8 +215,8 @@ static inline uint8_t skrit__gated(skrit_dev *d) { return d->hal->auth_required 
 // Frame `raw` (TYPE SEQ LEN BODY CRC, or a DATA blob) onto the CMD endpoint.
 // `channel` is ignored on a dual link; on a mux link it is prepended pre-COBS.
 static void skrit__send(skrit_dev *d, uint8_t channel, const uint8_t *raw, uint16_t n) {
-  uint8_t buf[1 + SKRIT_RX_CAP];
-  uint8_t cobs[SKRIT_RX_CAP + 8];
+  uint8_t buf[1 + SKRIT_SEND_CAP];
+  uint8_t cobs[1 + SKRIT_SEND_CAP + 8];
   uint16_t plen = n;
   const uint8_t *payload = raw;
   if (d->muxed) {
@@ -249,8 +257,10 @@ static void skrit__console_out(skrit_dev *d, const uint8_t *p, uint16_t n) {
     if (d->hal->host_write && n) d->hal->host_write(d->ctx, p, n);
     return;
   }
+  // Never exceed what skrit__send can frame (one channel byte + payload).
+  const uint16_t chunk = (SKRIT_MUX_CHUNK < SKRIT_SEND_CAP) ? SKRIT_MUX_CHUNK : (SKRIT_SEND_CAP - 1);
   while (n) {
-    uint16_t c = n > SKRIT_MUX_CHUNK ? SKRIT_MUX_CHUNK : n;
+    uint16_t c = n > chunk ? chunk : n;
     skrit__send(d, SKRIT_MUX_DATA, p, c);
     p += c;
     n -= c;
