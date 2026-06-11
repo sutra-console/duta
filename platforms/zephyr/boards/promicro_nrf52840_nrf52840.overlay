@@ -1,0 +1,31 @@
+// Pro Micro nRF52840 — the "nice!nano v2 compatible" / SuperMini clone family.
+// Board facts come from the upstream Zephyr board (boards/others/promicro_nrf52840):
+//   * led0 = P0.15 (onboard blue LED), uart0 routed to the silkscreened TX/RX
+//     pads (P0.09 TX / P0.10 RX; the NFC pins, freed as GPIO by the board UICR),
+//     and a USB CDC ACM (cdc_acm_uart0) already in the board DTS.
+// This overlay only adds OUR Duta wiring:
+//   * CMD + DATA mux   -> the board's USB CDC ACM (BLE alt via overlay-ble.conf).
+//   * DATA console      -> uart0 (TX P0.09 / RX P0.10).
+//   * Aux LED           -> led0 (the onboard blue LED).
+//   * Relay 1 / Relay 2 -> P0.06 / P0.08 — free broken-out digital pads. This is
+//     our default wiring; verify against your board's exposed pads and rewire.
+
+/ {
+	aliases {
+		duta-data = &uart0; // led0 (aux LED) is already aliased by the board
+		led1 = &relay1;     // main.c maps led1 -> Relay 1
+		led2 = &relay2;     //               led2 -> Relay 2
+	};
+
+	duta_relays {
+		compatible = "gpio-leds";
+		relay1: relay_1 {
+			gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
+			label = "Relay 1";
+		};
+		relay2: relay_2 {
+			gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+			label = "Relay 2";
+		};
+	};
+};

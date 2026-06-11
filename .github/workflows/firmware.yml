@@ -109,7 +109,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        board: [native_sim, nrf52840dk/nrf52840]
+        board: [native_sim, nrf52840dk/nrf52840, promicro_nrf52840/nrf52840]
     steps:
       - uses: actions/checkout@v5
         with:

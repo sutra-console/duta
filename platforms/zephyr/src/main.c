@@ -143,6 +143,12 @@ static const struct bt_data ble_sd[] = {
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, CMD_SVC), // scan rsp: the skrit CMD UUID identifies us
 };
 
+// Zephyr 4.3 removed the deprecated BT_LE_ADV_CONN; FAST_2 (100-150ms interval)
+// is the recommended replacement and exists on 4.2 too.
+#ifndef BT_LE_ADV_CONN
+#define BT_LE_ADV_CONN BT_LE_ADV_CONN_FAST_2
+#endif
+
 static void ble_advertise(void) {
   int err = bt_le_adv_start(BT_LE_ADV_CONN, ble_ad, ARRAY_SIZE(ble_ad), ble_sd, ARRAY_SIZE(ble_sd));
   if (err) printk("Duta: adv start failed (%d)\n", err);

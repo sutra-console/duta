@@ -56,6 +56,10 @@ targets:
     transport: usb-mux
 
   - platform: zephyr
+    board: promicro_nrf52840/nrf52840 # nice!nano v2 / SuperMini clones
+    transport: usb-mux
+
+  - platform: zephyr
     board: native_sim
     transport: build-check
 

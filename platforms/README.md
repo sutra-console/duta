@@ -10,7 +10,7 @@ all speak the same wire protocol, so the **same desktop app drives all of them**
 | [`ch55xduino`](ch55xduino) | ch55xduino + arduino-cli (SDCC) | CH551/2/4 | USB dual-CDC | ✅ working |
 | [`espressif`](espressif) | Arduino / PlatformIO | ESP32 / S3 / C3 / Waveshare S3-Zero | USB mux | ✅ working |
 | [`pico`](pico) | arduino-pico / PlatformIO | RP2040 / RP2350 | USB mux | ✅ working |
-| [`zephyr`](zephyr) | west + Zephyr SDK | nRF52840 (DK + dongle) | USB mux | ✅ working |
+| [`zephyr`](zephyr) | west + Zephyr SDK | nRF52840 (DK · dongle · nice!nano v2) | USB mux | ✅ working |
 | [`host`](host) | CMake (native C) | Linux/macOS/Windows | WebSocket | ✅ reference |
 | `micropython` | mpy-cross | RP2040 / ESP32 | USB mux · WebSocket · BLE | ⬜ planned |
 

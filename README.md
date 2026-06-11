@@ -19,7 +19,7 @@ platforms/     firmware, one thin HAL per MCU on a shared core (all speak skrit)
   ch55xduino/    CH55x dual-CDC adapter (arduino-cli + SDCC)                     ✅ working
   espressif/     ESP32 / S3 / C3 / Waveshare S3-Zero (Arduino/PlatformIO)        ✅ working
   pico/          RP2040 / RP2350, Pico & Pico 2 (arduino-pico/PlatformIO)        ✅ working
-  zephyr/        nRF52840 DK + dongle, any Zephyr board (west)                   ✅ working
+  zephyr/        nRF52840 DK · dongle · nice!nano v2, any Zephyr board (west)     ✅ working
   host/          native reference over WebSocket                                 ✅ hardware-free CI
 protocol/      vendored skrit contract (PROTOCOL.md + protocol.h)
 BOARDS.md      the board model: platform → mcu → board → target

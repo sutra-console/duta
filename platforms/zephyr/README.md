@@ -6,14 +6,33 @@ Duta on **Zephyr** (west + Zephyr SDK), built on the shared core
 overlay for. `native_sim` is the hardware-free CI build-check.
 
 ```sh
-west build -b native_sim platforms/zephyr               # CI build-check
-west build -b nrf52840dk/nrf52840 platforms/zephyr      # DK (USB CDC)
-west build -b nrf52840dongle/nrf52840 platforms/zephyr  # USB dongle
-west flash                                              # (DK; dongle uses nrfutil/UF2)
+west build -b native_sim platforms/zephyr                  # CI build-check
+west build -b nrf52840dk/nrf52840 platforms/zephyr         # DK (USB CDC)
+west build -b nrf52840dongle/nrf52840 platforms/zephyr     # USB dongle
+west build -b promicro_nrf52840/nrf52840 platforms/zephyr  # nice!nano v2 / SuperMini clone
+west flash                                                 # (DK; UF2 boards: see below)
 
-# BLE transport instead of USB (Nordic UART Service):
+# BLE transport instead of USB (two skrit GATT services):
 west build -b nrf52840dk/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=overlay-ble.conf
 ```
+
+### Pro Micro nRF52840 (nice!nano v2 compatible)
+
+The `promicro_nrf52840/nrf52840` board is the upstream Zephyr target for the
+**nice!nano v2** and the SuperMini / "nRF52840 dev board compatible with Nice!Nano"
+clones — a Pro-Micro-footprint nRF52840 with a USB-C port, LiPo charger, an onboard
+blue LED (P0.15), and the **Adafruit UF2 bootloader**. It has no debug header, so
+flash over **UF2**, not `west flash`:
+
+1. `west build -b promicro_nrf52840/nrf52840 platforms/zephyr`
+2. **Double-tap reset** — a `NICENANO` (or `xxxBOOT`) USB drive appears.
+3. Drag `build/zephyr/zephyr.uf2` onto it; the board reboots running Duta.
+
+After the first flash you never touch the button again: the app's *Reboot →
+bootloader* (skrit `REBOOT`, GPREGRET `0x57`) drops it back into the UF2 drive.
+
+BLE works the same as on the DK — add `-DEXTRA_CONF_FILE=overlay-ble.conf`; the
+nice!nano's whole appeal is the untethered BLE link to Sutra.
 
 (Run inside a Zephyr workspace, or point `ZEPHYR_BASE` at one.)
 
@@ -37,6 +56,7 @@ under `zephyr_udc0` + a `duta-data` alias) and a `boards/<board>.conf` (USB stac
 |-------|-------------------|---------|---------------|
 | `nrf52840dk/nrf52840` | P1.01 / P1.02 | LEDs led0-led2 | GPREGRET `0x57` |
 | `nrf52840dongle/nrf52840` | P1.10 / P1.13 *(adjust)* | green + RGB LEDs | UF2/Open bootloader |
+| `promicro_nrf52840/nrf52840` | P0.09 / P0.10 (TX/RX pads) | blue LED (P0.15) + relays P0.06/P0.08 | GPREGRET `0x57` → UF2 |
 
 Optional `duta-dtr` / `duta-rts` GPIO aliases drive a target's reset/boot pins from
 `SERIAL_SIGNAL` (enter ESP/AVR bootloaders).
