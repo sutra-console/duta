@@ -16,6 +16,6 @@ endif()
 
 # Hardware-free unit test for the WebSocket codec (CI).
 add_executable(duta-host-test-ws test_ws.c)
-target_include_directories(duta-host-test-ws PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(duta-host-test-ws PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 enable_testing()
 add_test(NAME ws_codec COMMAND duta-host-test-ws)

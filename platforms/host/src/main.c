@@ -14,7 +14,7 @@
 #include <time.h>
 
 #include "skrit_device.h"
-#include "ws.h"
+#include "ws_codec.h"
 
 #ifdef _WIN32
 #include <winsock2.h>

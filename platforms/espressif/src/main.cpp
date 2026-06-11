@@ -50,6 +50,15 @@ extern "C" {
 }
 
 #include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
+#include "duta_wifi.h"   // WiFi + WebSocket bridge + captive portal (second skrit_dev)
+
+// CFG_GET/CFG_SET route to the WiFi module (the only key owner so far).
+static int16_t hal_cfg_get(void *, uint8_t key, uint8_t *out, uint8_t cap) {
+  return duta_wifi_cfg_get(key, out, cap);
+}
+static uint8_t hal_cfg_set(void *, uint8_t key, const uint8_t *val, uint8_t len) {
+  return duta_wifi_cfg_set(key, val, len);
+}
 
 #if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
 #include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG: force download (DFU) boot
@@ -199,10 +208,21 @@ void setup() {
   HAL.pin_caps = duta_io_pin_caps; // runtime provisioning (advertises FLAG_PROVISION)
   HAL.config_get = duta_io_config_get;
   HAL.config_set = duta_io_config_set;
+  HAL.cfg_get = hal_cfg_get; // key-value config (WiFi credentials/status)
+  HAL.cfg_set = hal_cfg_set;
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
+  duta_wifi_init(&HAL); // WS bridge: copies the HAL, joins / raises the portal
 }
 
 void loop() {
-  skrit_dev_poll(&dev); // drain target console -> host (wrapped on the mux link)
+  // Read the target console ONCE and tee it to every link (USB + WebSocket),
+  // each with its own session/auth state.
+  uint8_t buf[64];
+  uint16_t got = hal_data_read(nullptr, buf, sizeof buf);
+  if (got) {
+    skrit_dev_feed_data(&dev, buf, got);
+    skrit_dev_feed_data(&ws_dev, buf, got);
+  }
   while (Serial.available()) skrit_dev_rx(&dev, (uint8_t)Serial.read());
+  duta_wifi_loop(); // WiFi state machine + WS server pump
 }
