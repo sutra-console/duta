@@ -34,6 +34,24 @@ bootloader* (skrit `REBOOT`, GPREGRET `0x57`) drops it back into the UF2 drive.
 BLE works the same as on the DK — add `-DEXTRA_CONF_FILE=overlay-ble.conf`; the
 nice!nano's whole appeal is the untethered BLE link to Sutra.
 
+### BLE advertising sniffer variant
+
+The nRF52840 is also a capable BLE sniffer. Build with `overlay-sniff.conf` and
+the DATA channel becomes captured advertising packets (`DATA_DESC = ble-sniff`)
+instead of a UART console:
+
+```sh
+west build -b promicro_nrf52840/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=overlay-sniff.conf
+```
+
+It drives the radio directly (so it's mutually exclusive with the BLE
+*transport* — `CONFIG_BT` must stay off), listens promiscuously on advertising
+channels 37/38/39, and emits each captured PDU as one DATA record
+(`ts · channel · rssi · access-address · pdu`; bad-CRC drops). Hardware-verified
+on the nice!nano — ~70 packets/s of real nearby advertising, decodable down to
+the manufacturer-data company IDs. v1 is advertising-only; connection-following
+is future work.
+
 (Run inside a Zephyr workspace, or point `ZEPHYR_BASE` at one.)
 
 ## Transport

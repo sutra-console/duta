@@ -26,6 +26,9 @@
 #endif
 
 #include "skrit_device.h"
+#ifdef CONFIG_DUTA_SNIFF
+#include "duta_ble_sniff.h"
+#endif
 
 #define FW_LO 0x04
 #define FW_HI 0x00
@@ -372,6 +375,9 @@ static void hal_pump(void *c) {
 static const skrit_hal HAL = {
     .name = "Duta nRF52840",
     .fw_ver = (FW_HI << 8) | FW_LO,
+#ifdef CONFIG_DUTA_SNIFF
+    .data_kind = SKRIT_DATA_BLE_SNIFF, // DATA is captured adv PDUs, not a UART console
+#endif
     .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
     .store_kb = 0,
@@ -424,12 +430,26 @@ int main(void) {
     printk("Duta zephyr build-check (no transport). PING=0x%02x\n", SKRIT_PING);
     return 0;
   }
+#ifdef CONFIG_DUTA_SNIFF
+  // BLE sniffer: DATA is captured advertising PDUs (no UART). Poll the radio and
+  // emit each packet as a DATA record; CMD still works over the same mux link.
+  duta_sniff_init();
+  for (;;) {
+    uint8_t rec[64];
+    uint16_t n;
+    while ((n = duta_sniff_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
+    unsigned char b;
+    while (uart_poll_in(cmd_dev, &b) == 0) skrit_dev_rx(&dev, (uint8_t)b);
+    k_yield();
+  }
+#else
   for (;;) {
     skrit_dev_poll(&dev); // tee target console -> host
     unsigned char b;
     while (uart_poll_in(cmd_dev, &b) == 0) skrit_dev_rx(&dev, (uint8_t)b);
     k_msleep(1);
   }
+#endif
 #endif
   return 0;
 }

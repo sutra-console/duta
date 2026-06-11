@@ -7,3 +7,4 @@ target_include_directories(app PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../protocol
   ${CMAKE_CURRENT_SOURCE_DIR}/../common)
 target_sources(app PRIVATE src/main.c)
+target_sources_ifdef(CONFIG_DUTA_SNIFF app PRIVATE src/duta_ble_sniff.c)
