@@ -56,6 +56,14 @@ static uint8_t m_kvset(void*c,uint8_t key,const uint8_t*val,uint8_t n){
   if(key==SKRIT_CFG_WIFI_SSID){ if(n>32)return SKRIT_ST_BADARGS; memcpy(cfg_ssid,val,n); cfg_ssid_n=n; return SKRIT_ST_OK; }
   if(key==SKRIT_CFG_WIFI_PASS){ cfg_pass_stored=n>0; return SKRIT_ST_OK; }
   return SKRIT_ST_NOTFOUND; }
+// mock I2C bus: one register device at 0x3C (reg pointer + 8-byte register file)
+static uint8_t i2c_regs[8]={0x11,0x22,0x33,0,0,0,0,0}, i2c_ptr=0;
+static uint8_t m_i2cscan(void*c,uint8_t bitmap[16]){(void)c;memset(bitmap,0,16);bitmap[0x3C>>3]|=1<<(0x3C&7);return SKRIT_ST_OK;}
+static uint8_t m_i2cxfer(void*c,uint8_t addr,const uint8_t*w,uint8_t wlen,uint8_t*r,uint8_t rlen){
+  (void)c; if(addr!=0x3C)return SKRIT_ST_NOTFOUND;
+  for(uint8_t i=0;i<wlen;i++){ if(i==0)i2c_ptr=w[0]&7; else i2c_regs[(i2c_ptr+i-1)&7]=w[i]; }
+  for(uint8_t i=0;i<rlen;i++) r[i]=i2c_regs[(i2c_ptr+i)&7];
+  return SKRIT_ST_OK;}
 static uint8_t m_pincaps(void*c,uint8_t i,int16_t*pin,uint8_t*caps,uint8_t*warn,uint8_t*bus,const char**nm){
   (void)c; if(i<2){*pin=prov_pin[i];*caps=SKRIT_PINCAP_DIGITAL|SKRIT_PINCAP_PWM;*warn=prov_warn[i];*bus=SKRIT_NO_BUS;*nm=prov_name[i];} return 2;}
 static uint8_t m_cfgget(void*c,uint8_t i,uint8_t*t,int16_t*pin,uint8_t*fl,uint16_t*arg,const char**nm){
@@ -348,6 +356,39 @@ int main(void){
       assert(r[3] == SKRIT_ST_NOTFOUND); }
   }
   printf("CFG get/set (wifi keys) ok\n");
+
+  // ---- I2C master: scan bitmap + write/read transfer ----
+  {
+    // no callbacks -> UNSUPPORTED
+    skrit_dev bare; skrit_dev_init(&bare, &hal, NULL, 1);
+    link_n = 0; feed_cmd(&bare, SKRIT_I2C_SCAN, 1, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_UNSUPPORTED);
+
+    skrit_hal ihal = hal;
+    ihal.i2c_scan = m_i2cscan; ihal.i2c_xfer = m_i2cxfer;
+    skrit_dev idev; skrit_dev_init(&idev, &ihal, NULL, 1);
+    // scan -> bitmap with only 0x3C set
+    link_n = 0; feed_cmd(&idev, SKRIT_I2C_SCAN, 2, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK && r[2] == 17);
+    assert(r[4 + (0x3C >> 3)] == (1 << (0x3C & 7)));
+    for (int i = 0; i < 16; i++) if (i != (0x3C >> 3)) assert(r[4 + i] == 0);
+    // write reg pointer 1 + two bytes, then read them back
+    { uint8_t x[] = {0x3C, 3, 0x01, 0xAA, 0xBB, 0}; // addr, wlen=3, ptr+2 data, rlen=0
+      link_n = 0; feed_cmd(&idev, SKRIT_I2C_XFER, 3, x, (uint8_t)sizeof x, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[4] == 0x3C); }
+    { uint8_t x[] = {0x3C, 1, 0x01, 2}; // set ptr=1, read 2
+      link_n = 0; feed_cmd(&idev, SKRIT_I2C_XFER, 4, x, (uint8_t)sizeof x, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[5] == 0xAA && r[6] == 0xBB); }
+    // NAK (absent address) -> NOTFOUND
+    { uint8_t x[] = {0x10, 0, 1}; link_n = 0;
+      feed_cmd(&idev, SKRIT_I2C_XFER, 5, x, (uint8_t)sizeof x, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_NOTFOUND); }
+    // malformed (wlen doesn't match body) -> BADARGS
+    { uint8_t x[] = {0x3C, 9, 0x01, 2}; link_n = 0;
+      feed_cmd(&idev, SKRIT_I2C_XFER, 6, x, (uint8_t)sizeof x, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_BADARGS); }
+  }
+  printf("I2C scan/xfer ok\n");
 
   // ---- skrit_dev_feed_data: one read tees to several links ----
   {

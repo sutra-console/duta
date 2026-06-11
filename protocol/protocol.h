@@ -62,6 +62,12 @@ enum {
   SKRIT_EE_WRITE = 0x31,
   SKRIT_CFG_GET = 0x40,
   SKRIT_CFG_SET = 0x41,
+  // I2C master (devices whose DATA bridge supports kind i2c). Every transfer
+  // the master performs is ALSO emitted on the DATA channel as a record (see
+  // the i2c record framing note below) so captures see the bus activity.
+  SKRIT_I2C_SCAN = 0x60, // (none) -> st, bitmap(16): bit (a&7) of byte (a>>3) = addr a ACKed
+  SKRIT_I2C_XFER = 0x61, // addr(1), wlen(1), w..., rlen(1) -> st, addr(1), r...
+                         //   write-only: rlen=0 · read-only: wlen=0 · NAK -> st 0x05 not-found
   // Async device->host events (0x50..0x5F): RESP bit clear, SEQ=0, NOT request/reply.
   // A host routes TYPE in this range to an event sink, never the seq-matcher.
   SKRIT_EVENT_LOG = 0x50,   // text(...): device log line (e.g. macro progress)
@@ -190,7 +196,11 @@ enum {
   SKRIT_DATA_SPI = 3,       // SPI
   SKRIT_DATA_BLE_SNIFF = 4, // sniffed BLE packets
   SKRIT_DATA_LOGIC = 5,     // logic-analyzer samples
-  SKRIT_DATA_I2C = 6,       // I2C transactions (first non-UART backend target)
+  SKRIT_DATA_I2C = 6,       // I2C transactions (the first non-UART backend)
+// i2c DATA records (kind = SKRIT_DATA_I2C): one mux DATA frame carries exactly
+// ONE record — the mux framing IS the record framing:
+//   ts_ms(4 LE) · addr(1) · flags(1) · wlen(1) · w-bytes · rlen(1) · r-bytes
+//   flags: bit0 = transfer included a read phase · bit1 = NAK / failed
 };
 
 // ---- CFG keys (CFG_GET: key -> value; CFG_SET: key + value) ----
@@ -201,6 +211,9 @@ enum {
   SKRIT_CFG_WIFI_PASS = 0x11,   // wo: password string; GET answers "*" when one is stored
   SKRIT_CFG_WIFI_STATUS = 0x12, // ro: state(1) + detail string (IP / AP name / SSID)
   SKRIT_CFG_DATA_PINS = 0x13,   // ro: tx(2,LE) + rx(2,LE) — the DATA bridge's pins (-1 = none)
+  SKRIT_CFG_DATA_KIND = 0x14,   // rw: 1 byte, a SKRIT_DATA_* kind — switches the bridged
+                                //     medium (uart <-> i2c) where the device supports it;
+                                //     persisted; DATA_DESC reflects the active kind
 };
 // SKRIT_CFG_WIFI_STATUS state byte
 enum {

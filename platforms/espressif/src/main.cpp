@@ -50,9 +50,30 @@ extern "C" {
 }
 
 #include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
+#include "duta_i2c.h"    // I2C master DATA backend (Wire) — the first non-UART medium
 #include "duta_wifi.h"   // WiFi + WebSocket bridge + captive portal (second skrit_dev)
 
-// CFG_GET/CFG_SET: DATA pins answered here; WiFi keys route to the WiFi module.
+// The bridged medium: SKRIT_DATA_UART (console tee) or SKRIT_DATA_I2C (master +
+// transaction records). Switched via CFG_DATA_KIND, persisted in NVS ("dkind").
+static uint8_t g_data_kind = SKRIT_DATA_UART;
+static Preferences kind_prefs;
+
+static void data_kind_apply(uint8_t kind); // defined after the HAL (it updates it)
+static void data_kind_load(void) {
+  uint8_t kind = SKRIT_DATA_UART;
+  if (kind_prefs.begin("duta", true)) {
+    kind = (uint8_t)kind_prefs.getUChar("dkind", SKRIT_DATA_UART);
+    kind_prefs.end();
+  }
+  data_kind_apply(kind == SKRIT_DATA_I2C ? SKRIT_DATA_I2C : SKRIT_DATA_UART);
+}
+static void data_kind_save(uint8_t kind) {
+  if (!kind_prefs.begin("duta", false)) return;
+  kind_prefs.putUChar("dkind", kind);
+  kind_prefs.end();
+}
+
+// CFG_GET/CFG_SET: DATA pins + kind answered here; WiFi keys route to the module.
 static int16_t hal_cfg_get(void *, uint8_t key, uint8_t *out, uint8_t cap) {
   if (key == SKRIT_CFG_DATA_PINS) {
     if (cap < 4) return -1;
@@ -63,11 +84,25 @@ static int16_t hal_cfg_get(void *, uint8_t key, uint8_t *out, uint8_t cap) {
     out[3] = (uint8_t)(rx >> 8);
     return 4;
   }
+  if (key == SKRIT_CFG_DATA_KIND) {
+    if (cap < 1) return -1;
+    out[0] = g_data_kind;
+    return 1;
+  }
   return duta_wifi_cfg_get(key, out, cap);
 }
 static uint8_t hal_cfg_set(void *, uint8_t key, const uint8_t *val, uint8_t len) {
+  if (key == SKRIT_CFG_DATA_KIND) {
+    if (len != 1) return SKRIT_ST_BADARGS;
+    if (val[0] != SKRIT_DATA_UART && val[0] != SKRIT_DATA_I2C) return SKRIT_ST_BADARGS;
+    data_kind_apply(val[0]);
+    data_kind_save(val[0]);
+    return SKRIT_ST_OK;
+  }
   return duta_wifi_cfg_set(key, val, len);
 }
+
+// (I2C HAL shims live below the dev declarations — they fan records to the links.)
 
 #if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
 #include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG: force download (DFU) boot
@@ -84,6 +119,26 @@ static uint32_t g_baud = 115200;
 static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
 
 static skrit_dev dev;
+
+// ---- I2C HAL shims: do the transfer, then fan the record out to every link --
+static void i2c_emit_record(uint8_t addr, uint8_t flags, const uint8_t *w, uint8_t wlen,
+                            const uint8_t *r, uint8_t rlen) {
+  uint8_t rec[8 + 255];
+  uint16_t n = duta_i2c_record(rec, sizeof rec, addr, flags, w, wlen, r, rlen);
+  if (!n) return;
+  skrit_dev_feed_data(&dev, rec, n); // auth/gating is per-link inside feed
+  skrit_dev_feed_data(&ws_dev, rec, n);
+}
+static uint8_t hal_i2c_scan(void *, uint8_t bitmap[16]) { return duta_i2c_scan(bitmap); }
+static uint8_t hal_i2c_xfer(void *, uint8_t addr, const uint8_t *w, uint8_t wlen, uint8_t *r,
+                            uint8_t rlen) {
+  uint8_t st = duta_i2c_xfer(addr, w, wlen, r, rlen);
+  uint8_t flags = (uint8_t)((rlen ? 1 : 0) | (st != SKRIT_ST_OK ? 2 : 0));
+  if (g_data_kind == SKRIT_DATA_I2C && st != SKRIT_ST_UNSUPPORTED)
+    i2c_emit_record(addr, flags, w, wlen, st == SKRIT_ST_OK ? r : NULL,
+                    st == SKRIT_ST_OK ? rlen : 0);
+  return st;
+}
 
 // Translate (bits,parity,stop) into the Arduino SerialConfig word, covering the
 // configs people actually use; falls back to 8N1.
@@ -193,6 +248,15 @@ static skrit_hal HAL = {
     hal_millis, hal_pump,
 };
 
+// Switch the bridged medium live: both devs read their HALs by pointer.
+static void data_kind_apply(uint8_t kind) {
+  g_data_kind = kind;
+  HAL.data_kind = kind;
+  WS_HAL.data_kind = kind;
+  if (kind == SKRIT_DATA_I2C) duta_i2c_begin();
+  else duta_i2c_end();
+}
+
 // ---- Arduino entry points --------------------------------------------------
 void setup() {
   duta_io_begin(); // configure every output/input from the board table
@@ -217,20 +281,26 @@ void setup() {
   HAL.pin_caps = duta_io_pin_caps; // runtime provisioning (advertises FLAG_PROVISION)
   HAL.config_get = duta_io_config_get;
   HAL.config_set = duta_io_config_set;
-  HAL.cfg_get = hal_cfg_get; // key-value config (WiFi credentials/status)
+  HAL.cfg_get = hal_cfg_get; // key-value config (WiFi credentials/status/kind)
   HAL.cfg_set = hal_cfg_set;
+  HAL.i2c_scan = hal_i2c_scan; // I2C master (active when DATA kind = i2c)
+  HAL.i2c_xfer = hal_i2c_xfer;
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
   duta_wifi_init(&HAL); // WS bridge: copies the HAL, joins / raises the portal
+  data_kind_load();     // after wifi_init so the WS_HAL copy gets the kind too
 }
 
 void loop() {
-  // Read the target console ONCE and tee it to every link (USB + WebSocket),
-  // each with its own session/auth state.
-  uint8_t buf[64];
-  uint16_t got = hal_data_read(nullptr, buf, sizeof buf);
-  if (got) {
-    skrit_dev_feed_data(&dev, buf, got);
-    skrit_dev_feed_data(&ws_dev, buf, got);
+  // UART kind: read the target console ONCE and tee it to every link (USB +
+  // WebSocket), each with its own session/auth state. I2C kind: the records
+  // are emitted from the I2C_XFER path instead; the console is paused.
+  if (g_data_kind == SKRIT_DATA_UART) {
+    uint8_t buf[64];
+    uint16_t got = hal_data_read(nullptr, buf, sizeof buf);
+    if (got) {
+      skrit_dev_feed_data(&dev, buf, got);
+      skrit_dev_feed_data(&ws_dev, buf, got);
+    }
   }
   while (Serial.available()) skrit_dev_rx(&dev, (uint8_t)Serial.read());
   duta_wifi_loop(); // WiFi state machine + WS server pump

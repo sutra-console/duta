@@ -152,6 +152,14 @@ typedef struct skrit_hal {
   //   cfg_set: validate + persist value for key; returns a SKRIT_ST_* status
   int16_t (*cfg_get)(void *ctx, uint8_t key, uint8_t *out, uint8_t cap);
   uint8_t (*cfg_set)(void *ctx, uint8_t key, const uint8_t *val, uint8_t len);
+
+  // ---- I2C master (DATA kind i2c). NULL = unsupported.
+  //   i2c_scan: on SKRIT_ST_OK, bitmap[16] holds the ACK map (bit a&7 of byte a>>3)
+  //   i2c_xfer: write wlen bytes then read rlen into r (either may be 0);
+  //             NAK -> SKRIT_ST_NOTFOUND. The platform emits the DATA record.
+  uint8_t (*i2c_scan)(void *ctx, uint8_t bitmap[16]);
+  uint8_t (*i2c_xfer)(void *ctx, uint8_t addr, const uint8_t *w, uint8_t wlen,
+                      uint8_t *r, uint8_t rlen);
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -783,6 +791,31 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
     skrit__status(d, type, seq, h->cfg_set(d->ctx, b[0], b + 1, (uint8_t)(len - 1)));
     break;
+
+  case SKRIT_I2C_SCAN: {
+    // (none) -> st, bitmap(16)
+    if (!h->i2c_scan) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    uint8_t st = h->i2c_scan(d->ctx, body + 1);
+    if (st != SKRIT_ST_OK) { skrit__status(d, type, seq, st); break; }
+    body[0] = SKRIT_ST_OK;
+    skrit__respond(d, type | SKRIT_RESP, seq, body, 17);
+    break;
+  }
+  case SKRIT_I2C_XFER: {
+    // addr(1), wlen(1), w..., rlen(1) -> st, addr(1), r...
+    if (!h->i2c_xfer) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 3 || (uint16_t)2 + b[1] + 1 != len) {
+      skrit__status(d, type, seq, SKRIT_ST_BADARGS);
+      break;
+    }
+    uint8_t wlen = b[1], rlen = b[2 + wlen];
+    if ((uint16_t)2 + rlen > SKRIT_MAX_BODY) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    body[0] = h->i2c_xfer(d->ctx, b[0], b + 2, wlen, body + 2, rlen);
+    if (body[0] != SKRIT_ST_OK) { skrit__status(d, type, seq, body[0]); break; }
+    body[1] = b[0];
+    skrit__respond(d, type | SKRIT_RESP, seq, body, (uint8_t)(2 + rlen));
+    break;
+  }
 
   default:
     skrit__status(d, type, seq, SKRIT_ST_BADMSG);
