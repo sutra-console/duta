@@ -27,4 +27,9 @@ void duta_154_sniff_set_channel(uint8_t ch);
 // The channel currently being listened on (the pinned one, or the live hop).
 uint8_t duta_154_sniff_get_channel(void);
 
+// Transmit one 802.15.4 MAC frame (WITHOUT FCS — the radio appends it) on the
+// current channel, then return to RX. `mac`/`maclen` is the on-air MAC frame the
+// host built. Backs DATA-channel writes: the host injects by writing a frame.
+void duta_154_sniff_tx(const uint8_t *mac, uint16_t maclen);
+
 #endif // DUTA_154_SNIFF_H

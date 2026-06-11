@@ -402,6 +402,13 @@ messages — see below): `value` holds the 802.15.4 channel (11–26 to pin one,
 **0 = promiscuous/auto-hop** across 11–26, sticking where traffic appears);
 `opt0..2` are unused. So `PROTO_SET idx=0, value=15` pins channel 15.
 
+**Injection (TX).** The DATA channel is bidirectional: a host **write** to the
+DATA channel is a MAC frame to **transmit** on the current channel. The host
+supplies the on-air MAC frame *without* the FCS — the radio appends it. The
+device drops back to RX after sending. (Inject on a network you control; a frame
+built with another node's source address + a high frame counter can desync that
+node's anti-replay state until it rejoins.)
+
 ## Link parameters (`PROTO_GET` / `PROTO_SET`)
 
 A device configures the bridged medium's link parameters through one generic pair

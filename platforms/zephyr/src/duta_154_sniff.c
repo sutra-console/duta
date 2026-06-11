@@ -31,6 +31,7 @@
 #define DWELL_MS 400 // hop away from a quiet channel after this long
 
 static uint8_t rx_buf[1 + 127 + 4]; // PHR(1) + max PSDU(127) + slack
+static uint8_t tx_buf[1 + 127];     // PHR(1) + MAC frame (radio appends the FCS)
 static uint8_t chan;                // current channel (11..26)
 static uint8_t fixed_chan;          // 0 = auto-hop; 11..26 = pinned channel
 static uint32_t last_hop_ms;
@@ -94,6 +95,32 @@ void duta_154_sniff_set_channel(uint8_t ch) {
 }
 
 uint8_t duta_154_sniff_get_channel(void) { return chan; }
+
+void duta_154_sniff_tx(const uint8_t *mac, uint16_t maclen) {
+  if (maclen == 0 || maclen > 125) return; // +2 FCS must fit a 127-byte PSDU
+  // Stop RX, transmit, then return to RX on the same channel. Single-threaded
+  // with take(), so no concurrency with the receive path.
+  NRF_RADIO->TASKS_DISABLE = 1;
+  uint32_t guard = 100000;
+  while (NRF_RADIO->STATE != RADIO_STATE_STATE_Disabled && guard--) { /* settle */ }
+
+  tx_buf[0] = (uint8_t)(maclen + 2); // PHR length includes the 2-byte FCS (CRCINC)
+  memcpy(tx_buf + 1, mac, maclen);   // the radio computes + appends the FCS
+  NRF_RADIO->PACKETPTR = (uint32_t)tx_buf;
+  NRF_RADIO->FREQUENCY = chan_freq(chan);
+  NRF_RADIO->EVENTS_END = 0;
+  NRF_RADIO->EVENTS_DISABLED = 0;
+  NRF_RADIO->TASKS_TXEN = 1; // READY_START kicks TX; END_DISABLE disables after
+  guard = 2000000;
+  while (!NRF_RADIO->EVENTS_END && guard--) { /* wait for TX to finish */ }
+  NRF_RADIO->EVENTS_END = 0;
+
+  // Re-arm RX (restore the receive buffer first) if we're still sniffing.
+  guard = 100000;
+  while (NRF_RADIO->STATE != RADIO_STATE_STATE_Disabled && guard--) { /* settle */ }
+  NRF_RADIO->PACKETPTR = (uint32_t)rx_buf;
+  if (sniff_active) radio_arm(chan);
+}
 
 void duta_154_sniff_stop(void) {
   if (!sniff_active) return;

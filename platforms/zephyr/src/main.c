@@ -293,6 +293,11 @@ static void transport_start(void) {
 // ---- DATA console + control HAL (shared by both transports) ----------------
 static void hal_data_write(void *c, const uint8_t *p, uint16_t n) {
   ARG_UNUSED(c);
+#ifdef CONFIG_DUTA_SNIFF_154
+  // The "wire" is the radio: a host DATA write is a frame to inject over the air.
+  duta_154_sniff_tx(p, n);
+  return;
+#endif
   if (!data_dev) return;
   for (uint16_t i = 0; i < n; i++) uart_poll_out(data_dev, p[i]);
 }
