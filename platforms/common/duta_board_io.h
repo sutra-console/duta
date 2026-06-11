@@ -43,4 +43,21 @@ static const duta_io duta_outputs[] = {
 #endif
 };
 
+// Role pins (the DATA bridge UART + optional DTR/RTS) are committed hardware:
+// reserve them from the provisioning menu so a relay can't land on the console.
+// Hosts list them via CFG_GET DATA_PINS.
+#ifdef DUTA_PINCAP_H
+static const duta_pin_use duta_role_uses[] = {
+    {DATA_TX_PIN, DUTA_USE_FIXED, "DATA UART TX"},
+    {DATA_RX_PIN, DUTA_USE_FIXED, "DATA UART RX"},
+#if defined(DTR_PIN) && (DTR_PIN) >= 0
+    {DTR_PIN, DUTA_USE_FIXED, "target DTR"},
+#endif
+#if defined(RTS_PIN) && (RTS_PIN) >= 0
+    {RTS_PIN, DUTA_USE_FIXED, "target RTS"},
+#endif
+};
+#define DUTA_ROLE_USES_N ((uint8_t)(sizeof duta_role_uses / sizeof duta_role_uses[0]))
+#endif
+
 #endif // DUTA_BOARD_IO_H

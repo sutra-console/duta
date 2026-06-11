@@ -52,8 +52,17 @@ extern "C" {
 #include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
 #include "duta_wifi.h"   // WiFi + WebSocket bridge + captive portal (second skrit_dev)
 
-// CFG_GET/CFG_SET route to the WiFi module (the only key owner so far).
+// CFG_GET/CFG_SET: DATA pins answered here; WiFi keys route to the WiFi module.
 static int16_t hal_cfg_get(void *, uint8_t key, uint8_t *out, uint8_t cap) {
+  if (key == SKRIT_CFG_DATA_PINS) {
+    if (cap < 4) return -1;
+    int16_t tx = DATA_TX_PIN, rx = DATA_RX_PIN;
+    out[0] = (uint8_t)tx;
+    out[1] = (uint8_t)(tx >> 8);
+    out[2] = (uint8_t)rx;
+    out[3] = (uint8_t)(rx >> 8);
+    return 4;
+  }
   return duta_wifi_cfg_get(key, out, cap);
 }
 static uint8_t hal_cfg_set(void *, uint8_t key, const uint8_t *val, uint8_t len) {

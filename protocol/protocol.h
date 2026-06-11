@@ -200,6 +200,7 @@ enum {
   SKRIT_CFG_WIFI_SSID = 0x10,   // rw: SSID string; set empty to forget the network
   SKRIT_CFG_WIFI_PASS = 0x11,   // wo: password string; GET answers "*" when one is stored
   SKRIT_CFG_WIFI_STATUS = 0x12, // ro: state(1) + detail string (IP / AP name / SSID)
+  SKRIT_CFG_DATA_PINS = 0x13,   // ro: tx(2,LE) + rx(2,LE) — the DATA bridge's pins (-1 = none)
 };
 // SKRIT_CFG_WIFI_STATUS state byte
 enum {

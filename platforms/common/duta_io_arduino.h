@@ -306,12 +306,27 @@ static uint8_t duta__pin_broken_out(int16_t pin) {
 #endif
 }
 
+// A target with no role reservations (or a custom table) just doesn't declare
+// duta_role_uses[]; placeholder so the merged lookup always compiles.
+#ifndef DUTA_ROLE_USES_N
+static const duta_pin_use duta_role_uses[] = {{-1, DUTA_USE_NONE, ""}};
+#define DUTA_ROLE_USES_N 0
+#endif
+
 // The board-layer commitment for `pin`: DUTA_USE_NONE / FIXED / DUAL (+ label).
+// Merges the vendored board's onboard uses with the target's role reservations
+// (DATA UART, DTR/RTS) — both carve pins out of the provisioning menu.
 static uint8_t duta__pin_use(int16_t pin, const char **what) {
   for (uint8_t i = 0; i < (uint8_t)(DUTA_USES_N); i++)
     if (duta_board_uses[i].pin == pin) {
       if (what) *what = duta_board_uses[i].what;
       return duta_board_uses[i].use;
+    }
+  const uint8_t role_n = (uint8_t)(DUTA_ROLE_USES_N); // runtime var: avoids -Wtype-limits when 0
+  for (uint8_t i = 0; i < role_n; i++)
+    if (duta_role_uses[i].pin == pin) {
+      if (what) *what = duta_role_uses[i].what;
+      return duta_role_uses[i].use;
     }
   if (what) *what = "";
   return DUTA_USE_NONE;
