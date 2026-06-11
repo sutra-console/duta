@@ -1,8 +1,8 @@
 // nRF52840 DK — Duta transport map.
 //   * CMD + DATA mux  -> a CDC ACM port on the USB device controller.
 //   * DATA console     -> UART1 on header pins P1.01 (TX) / P1.02 (RX).
-//   * Outputs          -> the four on-board LEDs (led0..led2) as the aux LED + 2
-//                         "relays" for demo; rewire to real relay GPIOs as needed.
+//   * Status LED       -> led0 (onboard) is the only default output; other
+//                         fixtures are added at runtime via provisioning.
 #include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
 
 / {

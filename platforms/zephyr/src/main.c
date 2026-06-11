@@ -34,12 +34,13 @@
 // Sniffer variants drive the nRF radio directly and replace the UART DATA bridge
 // with captured radio frames. One backend at a time, selected at build time; both
 // expose the same sniff_* surface so the loop below is backend-agnostic.
+#define DUTA_N_GPIO_OUT 1 // onboard status LED (led0) — the onboard-only default
 #if defined(CONFIG_DUTA_SNIFF) || defined(CONFIG_DUTA_SNIFF_154)
 #define DUTA_SNIFFER 1
-#define SNIFF_OUT_IDX 3 // a virtual "Sniffing" output (start/stop) past the 3 gpios
-#define DUTA_N_OUTPUTS 4
+#define SNIFF_OUT_IDX DUTA_N_GPIO_OUT // a virtual "Sniffing" output past the gpios
+#define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 1)
 #else
-#define DUTA_N_OUTPUTS 3
+#define DUTA_N_OUTPUTS DUTA_N_GPIO_OUT
 #endif
 
 #ifdef CONFIG_DUTA_SNIFF
@@ -71,15 +72,15 @@
 #endif
 static const struct device *data_dev = DATA_DEV;
 
-// ---- outputs: Relay 1, Relay 2, Aux LED (map to whatever LEDs/gpios exist) ---
-// GPIO_DT_SPEC_GET_OR yields {0} for a missing alias; guarded by device_is_ready.
-static const struct gpio_dt_spec out_gpio[3] = {
-    GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios, {0}), // Relay 1
-    GPIO_DT_SPEC_GET_OR(DT_ALIAS(led2), gpios, {0}), // Relay 2
-    GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios, {0}), // Aux LED
+// ---- outputs: the board's onboard status LED only (led0). External fixtures
+// (relays, etc.) are NOT a compiled default — add them at runtime via
+// provisioning. GPIO_DT_SPEC_GET_OR yields {0} for a missing alias; guarded by
+// device_is_ready. ----------------------------------------------------------
+static const struct gpio_dt_spec out_gpio[DUTA_N_GPIO_OUT] = {
+    GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios, {0}), // onboard status LED
 };
-static const char *const OUT_NAME[3] = {"Relay 1", "Relay 2", "Aux LED"};
-static uint8_t g_out[3];
+static const char *const OUT_NAME[DUTA_N_GPIO_OUT] = {"Status LED"};
+static uint8_t g_out[DUTA_N_GPIO_OUT];
 
 // optional target reset/boot lines (drive a target's DTR/RTS-equivalent pins)
 static const struct gpio_dt_spec dtr_gpio = GPIO_DT_SPEC_GET_OR(DT_ALIAS(duta_dtr), gpios, {0});
@@ -319,7 +320,7 @@ static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
     return;
   }
 #endif
-  if (idx > 2) return;
+  if (idx >= DUTA_N_GPIO_OUT) return;
   g_out[idx] = on ? 1 : 0;
   if (device_is_ready(out_gpio[idx].port)) gpio_pin_set_dt(&out_gpio[idx], on ? 1 : 0);
 }
@@ -328,7 +329,7 @@ static uint8_t hal_out_get(void *c, uint8_t idx) {
 #ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) return sniff_is_on() ? 1 : 0;
 #endif
-  return idx < 3 ? g_out[idx] : 0;
+  return idx < DUTA_N_GPIO_OUT ? g_out[idx] : 0;
 }
 static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
   ARG_UNUSED(c);
@@ -339,7 +340,7 @@ static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name)
     return;
   }
 #endif
-  if (idx > 2) return;
+  if (idx >= DUTA_N_GPIO_OUT) return;
   *type = SKRIT_CTRL_IO;
   *name = OUT_NAME[idx];
 }
@@ -481,7 +482,7 @@ static const skrit_hal HAL = {
 };
 
 int main(void) {
-  for (int i = 0; i < 3; i++)
+  for (int i = 0; i < DUTA_N_GPIO_OUT; i++)
     if (device_is_ready(out_gpio[i].port)) gpio_pin_configure_dt(&out_gpio[i], GPIO_OUTPUT_INACTIVE);
   if (device_is_ready(dtr_gpio.port)) gpio_pin_configure_dt(&dtr_gpio, GPIO_OUTPUT_INACTIVE);
   if (device_is_ready(rts_gpio.port)) gpio_pin_configure_dt(&rts_gpio, GPIO_OUTPUT_INACTIVE);

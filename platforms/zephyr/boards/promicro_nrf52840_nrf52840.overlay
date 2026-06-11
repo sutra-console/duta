@@ -6,30 +6,16 @@
 // This overlay only adds OUR Duta wiring:
 //   * CMD + DATA mux   -> the board's USB CDC ACM (BLE alt via overlay-ble.conf).
 //   * DATA console      -> uart0 (TX P0.09 / RX P0.10).
-//   * Aux LED           -> led0 (the onboard blue LED).
-//   * Relay 1 / Relay 2 -> P0.06 / P0.08 — free broken-out digital pads. This is
-//     our default wiring; verify against your board's exposed pads and rewire.
+//   * Status LED        -> led0 (the onboard blue LED) — the only default output.
+//   External fixtures (relays, etc.) are NOT a compiled default: add them at
+//   runtime via provisioning on the free broken-out pads.
 
 #include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 
 / {
 	aliases {
-		duta-data = &uart0; // led0 (aux LED) is already aliased by the board
-		led1 = &relay1;     // main.c maps led1 -> Relay 1
-		led2 = &relay2;     //               led2 -> Relay 2
-	};
-
-	duta_relays {
-		compatible = "gpio-leds";
-		relay1: relay_1 {
-			gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
-			label = "Relay 1";
-		};
-		relay2: relay_2 {
-			gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-			label = "Relay 2";
-		};
+		duta-data = &uart0; // led0 (status LED) is already aliased by the board
 	};
 
 	// ADC input (skrit input 0). Defaults to the nRF52840's internal supply
