@@ -108,10 +108,13 @@ typedef struct skrit_hal {
   void (*in_desc)(void *ctx, uint8_t idx, uint8_t *type, const char **name);
   uint16_t (*in_get)(void *ctx, uint8_t idx);
 
-  // DATA-UART control (NULL unless CAP_SERIAL). parity = SKRIT_PAR_*.
-  void (*serial_get)(void *ctx, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop);
-  void (*serial_set)(void *ctx, uint32_t baud, uint8_t bits, uint8_t par, uint8_t stop);
-  void (*serial_signal)(void *ctx, uint8_t mask, uint8_t value);
+  // Bridged-medium link params (NULL unless CAP_SERIAL). `value` is the medium's
+  // primary parameter, `opt0..2` are medium-specific, `idx` selects the interface
+  // (0 on single-interface devices). uart: value=baud, opt0=data_bits,
+  // opt1=parity(SKRIT_PAR_*), opt2=stop_bits · ieee802154: value=channel · i2c: value=clock.
+  void (*proto_get)(void *ctx, uint8_t idx, uint32_t *value, uint8_t *opt0, uint8_t *opt1, uint8_t *opt2);
+  void (*proto_set)(void *ctx, uint8_t idx, uint32_t value, uint8_t opt0, uint8_t opt1, uint8_t opt2);
+  void (*serial_signal)(void *ctx, uint8_t mask, uint8_t value); // UART modem/break lines
 
   // System (NULL unless CAP_REBOOT). mode = SKRIT_REBOOT_*.
   void (*reboot)(void *ctx, uint8_t mode);
@@ -176,6 +179,7 @@ typedef struct skrit_dev {
   void *ctx;
   uint8_t muxed; // 1 = single endpoint carries both channels (skrit-mux)
   uint8_t authed; // session authenticated (only matters when hal->auth_required)
+  uint8_t forward; // 1 = pipe DATA RX to the host (PROTO flags bit0); off = don't tee
 
   // CMD/mux receive state machine
   uint8_t rx[SKRIT_RX_CAP];
@@ -293,7 +297,9 @@ static int skrit__cmp(uint16_t a, uint8_t op, uint16_t b) {
 // SEVERAL links (e.g. USB + a WebSocket session) — read once, feed each dev.
 static void skrit_dev_feed_data(skrit_dev *d, const uint8_t *buf, uint16_t got) {
   if (!got) return;
-  if (!skrit__gated(d)) skrit__console_out(d, buf, got); // don't leak while unauthed
+  // Tee to the host unless gated (unauthed) or forwarding is off for this iface.
+  // EXPECT still runs below either way, so a macro can watch a non-forwarded link.
+  if (d->forward && !skrit__gated(d)) skrit__console_out(d, buf, got);
   if (d->exp_pat && !d->exp_hit) {
     for (uint16_t i = 0; i < got; i++) {
       uint8_t c = buf[i];
@@ -583,26 +589,31 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     break;
   }
 
-  case SKRIT_SERIAL_GET:
-    if (h->serial_get) {
-      uint32_t baud = 0; uint8_t bits = 8, par = 0, stop = 1;
-      h->serial_get(d->ctx, &baud, &bits, &par, &stop);
+  case SKRIT_PROTO_GET:
+    if (h->proto_get) {
+      uint8_t idx = (len >= 1) ? b[0] : 0;
+      uint32_t value = 0; uint8_t o0 = 8, o1 = 0, o2 = 1;
+      h->proto_get(d->ctx, idx, &value, &o0, &o1, &o2);
       body[bl++] = SKRIT_ST_OK;
-      body[bl++] = (uint8_t)(baud & 0xFF);
-      body[bl++] = (uint8_t)((baud >> 8) & 0xFF);
-      body[bl++] = (uint8_t)((baud >> 16) & 0xFF);
-      body[bl++] = (uint8_t)((baud >> 24) & 0xFF);
-      body[bl++] = bits; body[bl++] = par; body[bl++] = stop;
+      body[bl++] = idx;
+      body[bl++] = d->forward ? SKRIT_PROTO_FWD : 0; // forward is core-owned (gates the host tee)
+      body[bl++] = (uint8_t)(value & 0xFF);
+      body[bl++] = (uint8_t)((value >> 8) & 0xFF);
+      body[bl++] = (uint8_t)((value >> 16) & 0xFF);
+      body[bl++] = (uint8_t)((value >> 24) & 0xFF);
+      body[bl++] = o0; body[bl++] = o1; body[bl++] = o2;
       skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
     } else skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED);
     break;
-  case SKRIT_SERIAL_SET:
-    if (h->serial_set && len >= 7) {
-      uint32_t baud = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
-                      ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
-      h->serial_set(d->ctx, baud, b[4], b[5], b[6]);
+  case SKRIT_PROTO_SET:
+    if (h->proto_set && len >= 9) {
+      uint8_t idx = b[0];
+      d->forward = (b[1] & SKRIT_PROTO_FWD) ? 1 : 0; // flags byte; core gates the tee
+      uint32_t value = (uint32_t)b[2] | ((uint32_t)b[3] << 8) |
+                       ((uint32_t)b[4] << 16) | ((uint32_t)b[5] << 24);
+      h->proto_set(d->ctx, idx, value, b[6], b[7], b[8]);
       skrit__status(d, type, seq, SKRIT_ST_OK);
-    } else skrit__status(d, type, seq, h->serial_set ? SKRIT_ST_BADARGS : SKRIT_ST_UNSUPPORTED);
+    } else skrit__status(d, type, seq, h->proto_set ? SKRIT_ST_BADARGS : SKRIT_ST_UNSUPPORTED);
     break;
   case SKRIT_SERIAL_SIGNAL:
     if (h->serial_signal && len >= 2) {
@@ -933,6 +944,7 @@ static void skrit_dev_init(skrit_dev *d, const skrit_hal *hal, void *ctx, uint8_
   d->hal = hal;
   d->ctx = ctx;
   d->muxed = muxed ? 1 : 0;
+  d->forward = 1; // forward DATA RX to the host by default (PROTO_SET can disable)
 }
 
 #ifdef __cplusplus

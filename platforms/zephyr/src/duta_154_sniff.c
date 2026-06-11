@@ -32,6 +32,7 @@
 
 static uint8_t rx_buf[1 + 127 + 4]; // PHR(1) + max PSDU(127) + slack
 static uint8_t chan;                // current channel (11..26)
+static uint8_t fixed_chan;          // 0 = auto-hop; 11..26 = pinned channel
 static uint32_t last_hop_ms;
 static bool sniff_active;
 
@@ -77,10 +78,22 @@ void duta_154_sniff_init(void) {
 void duta_154_sniff_start(void) {
   if (sniff_active) return;
   sniff_active = true;
-  chan = CH_MIN;
+  chan = fixed_chan ? fixed_chan : CH_MIN;
   last_hop_ms = k_uptime_get_32();
   radio_arm(chan);
 }
+
+void duta_154_sniff_set_channel(uint8_t ch) {
+  fixed_chan = (ch >= CH_MIN && ch <= CH_MAX) ? ch : 0; // out of range => auto-hop
+  chan = fixed_chan ? fixed_chan : CH_MIN;
+  last_hop_ms = k_uptime_get_32();
+  if (sniff_active) {
+    NRF_RADIO->TASKS_DISABLE = 1;
+    radio_rearm(chan); // retune now
+  }
+}
+
+uint8_t duta_154_sniff_get_channel(void) { return chan; }
 
 void duta_154_sniff_stop(void) {
   if (!sniff_active) return;
@@ -97,8 +110,9 @@ uint16_t duta_154_sniff_take(uint8_t *out, uint16_t cap) {
   if (!sniff_active) return 0;
 
   if (!NRF_RADIO->EVENTS_END) {
-    // No frame yet — hop away from a channel that has stayed quiet too long.
-    if ((k_uptime_get_32() - last_hop_ms) >= DWELL_MS) {
+    // No frame yet — hop away from a channel that has stayed quiet too long
+    // (unless pinned to a fixed channel, in which case we just keep listening).
+    if (!fixed_chan && (k_uptime_get_32() - last_hop_ms) >= DWELL_MS) {
       NRF_RADIO->TASKS_DISABLE = 1;
       chan = (uint8_t)(chan + 1);
       if (chan > CH_MAX) chan = CH_MIN;

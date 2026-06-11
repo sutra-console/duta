@@ -21,4 +21,10 @@ bool duta_154_sniff_is_on(void);
 // wherever traffic appears. Record layout: see duta_154_sniff.c / PROTOCOL.md.
 uint16_t duta_154_sniff_take(uint8_t *out, uint16_t cap);
 
+// Pin the sniffer to one channel (11..26), or 0 to resume auto-hopping. Surfaced
+// over SERIAL_SET (the baud field carries the channel). Takes effect immediately.
+void duta_154_sniff_set_channel(uint8_t ch);
+// The channel currently being listened on (the pinned one, or the live hop).
+uint8_t duta_154_sniff_get_channel(void);
+
 #endif // DUTA_154_SNIFF_H

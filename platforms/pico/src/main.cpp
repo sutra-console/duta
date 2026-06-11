@@ -61,17 +61,19 @@ static uint16_t hal_data_read(void *, uint8_t *out, uint16_t cap) {
   return k;
 }
 
-static void hal_serial_get(void *, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop) {
-  *baud = g_baud;
-  *bits = g_bits;
-  *par = g_parity;
-  *stop = g_stop;
+static void hal_proto_get(void *, uint8_t idx, uint32_t *value, uint8_t *o0, uint8_t *o1, uint8_t *o2) {
+  (void)idx; // single interface; uart: value=baud, opt0=data_bits, opt1=parity, opt2=stop
+  *value = g_baud;
+  *o0 = g_bits;
+  *o1 = g_parity;
+  *o2 = g_stop;
 }
-static void hal_serial_set(void *, uint32_t baud, uint8_t bits, uint8_t par, uint8_t stop) {
-  if (baud) g_baud = baud;
-  if (bits) g_bits = bits;
-  g_parity = par;
-  if (stop) g_stop = stop;
+static void hal_proto_set(void *, uint8_t idx, uint32_t value, uint8_t o0, uint8_t o1, uint8_t o2) {
+  (void)idx;
+  if (value) g_baud = value;
+  if (o0) g_bits = o0;
+  g_parity = o1;
+  if (o2) g_stop = o2;
   TARGET.flush();
   TARGET.end();
   beginTarget();
@@ -132,7 +134,7 @@ static skrit_hal HAL = {
 #else
     /*in_desc*/ nullptr, /*in_get*/ nullptr,
 #endif
-    hal_serial_get, hal_serial_set, hal_serial_signal,
+    hal_proto_get, hal_proto_set, hal_serial_signal,
     hal_reboot,
     hal_millis, hal_pump,
 };

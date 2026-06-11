@@ -358,28 +358,45 @@ static uint16_t hal_in_get(void *c, uint8_t idx) {
 }
 #endif
 
-static void hal_serial_get(void *c, uint32_t *baud, uint8_t *bits, uint8_t *par, uint8_t *stop) {
+static void hal_proto_get(void *c, uint8_t idx, uint32_t *value, uint8_t *o0, uint8_t *o1, uint8_t *o2) {
   ARG_UNUSED(c);
-  *baud = g_baud;
-  *bits = g_bits;
-  *par = g_parity;
-  *stop = g_stop;
+  ARG_UNUSED(idx); // single interface
+#ifdef CONFIG_DUTA_SNIFF_154
+  // No UART here — a radio sniffer's link param is its channel (11..26; 0 = hop).
+  *value = duta_154_sniff_get_channel();
+  *o0 = 0;
+  *o1 = 0;
+  *o2 = 0;
+  return;
+#endif
+  *value = g_baud; // uart: value=baud, opt0=data_bits, opt1=parity, opt2=stop_bits
+  *o0 = g_bits;
+  *o1 = g_parity;
+  *o2 = g_stop;
 }
-static void hal_serial_set(void *c, uint32_t baud, uint8_t bits, uint8_t par, uint8_t stop) {
+static void hal_proto_set(void *c, uint8_t idx, uint32_t value, uint8_t o0, uint8_t o1, uint8_t o2) {
   ARG_UNUSED(c);
-  if (baud) g_baud = baud;
-  if (bits) g_bits = bits;
-  g_parity = par;
-  if (stop) g_stop = stop;
+  ARG_UNUSED(idx);
+#ifdef CONFIG_DUTA_SNIFF_154
+  ARG_UNUSED(o0);
+  ARG_UNUSED(o1);
+  ARG_UNUSED(o2);
+  duta_154_sniff_set_channel((uint8_t)value); // value carries the 802.15.4 channel
+  return;
+#endif
+  if (value) g_baud = value;
+  if (o0) g_bits = o0;
+  g_parity = o1;
+  if (o2) g_stop = o2;
   if (!data_dev || !device_is_ready(data_dev)) return;
   struct uart_config cfg = {
       .baudrate = g_baud,
       .data_bits = (g_bits == 7) ? UART_CFG_DATA_BITS_7 : UART_CFG_DATA_BITS_8,
       .stop_bits = (g_stop == 2) ? UART_CFG_STOP_BITS_2 : UART_CFG_STOP_BITS_1,
       .flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
-      .parity = (par == SKRIT_PAR_EVEN)  ? UART_CFG_PARITY_EVEN
-                : (par == SKRIT_PAR_ODD) ? UART_CFG_PARITY_ODD
-                                         : UART_CFG_PARITY_NONE,
+      .parity = (o1 == SKRIT_PAR_EVEN)  ? UART_CFG_PARITY_EVEN
+                : (o1 == SKRIT_PAR_ODD) ? UART_CFG_PARITY_ODD
+                                        : UART_CFG_PARITY_NONE,
   };
   uart_configure(data_dev, &cfg);
 }
@@ -450,8 +467,8 @@ static const skrit_hal HAL = {
     .in_desc = NULL,
     .in_get = NULL,
 #endif
-    .serial_get = hal_serial_get,
-    .serial_set = hal_serial_set,
+    .proto_get = hal_proto_get,
+    .proto_set = hal_proto_set,
     .serial_signal = hal_serial_signal,
     .reboot = hal_reboot,
     .millis = hal_millis,

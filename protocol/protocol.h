@@ -34,8 +34,14 @@ enum {
   SKRIT_INPUT_DESC = 0x14, // self-describe input: {index, type, name}
   SKRIT_INPUT_GET = 0x15,  // read input value (digital 0/1, analog 0-1023)
   SKRIT_OUT_PULSE = 0x16,  // index(1), ms(2): drive output on, restore after ms (momentary)
-  SKRIT_SERIAL_GET = 0x17, // -> baud(4), data_bits(1), parity(1), stop_bits(1)  (DATA UART)
-  SKRIT_SERIAL_SET = 0x18, // baud(4), data_bits(1), parity(1), stop_bits(1)
+  SKRIT_PROTO_GET = 0x17,  // idx(1) -> idx(1), flags(1), value(4 LE), opt0(1), opt1(1), opt2(1):
+                           //   interface idx's link params. flags: bit0 = forward this
+                           //   interface's RX to the host (off = don't pipe it). value =
+                           //   the medium's primary parameter; opt0..2 medium-specific.
+                           //   uart: value=baud, opt0=data_bits, opt1=parity, opt2=stop_bits ·
+                           //   i2c: value=clock Hz · ieee802154: value=channel (11-26; 0=hop).
+  SKRIT_PROTO_SET = 0x18,  // idx(1), flags(1), value(4 LE), opt0(1), opt1(1), opt2(1) -> st.
+                           //   Configure interface idx; takes effect immediately.
   SKRIT_SERIAL_SIGNAL = 0x19, // mask(1), value(1): drive DATA modem/break lines (see SKRIT_SIG_*)
   SKRIT_OUT_PWM = 0x1A, // index(1)[, duty(2)]: with duty = set PWM 0..1023; without = read back duty(2)
   SKRIT_OUT_RGB = 0x1B, // index(1)[, [pixel(1),] r(1), g(1), b(1)] -> index, count(1), r, g, b
@@ -85,6 +91,9 @@ enum { SKRIT_PAR_NONE = 0, SKRIT_PAR_ODD = 1, SKRIT_PAR_EVEN = 2 };
 // BREAK bit in `value` asserts a line break for the device's default break
 // window. Driving DTR/RTS lets a host enter ESP32 / AVR bootloaders by hand.
 enum { SKRIT_SIG_DTR = 0x01, SKRIT_SIG_RTS = 0x02, SKRIT_SIG_BREAK = 0x04 };
+
+// ---- PROTO flags byte (PROTO_GET/SET): per-interface options ----
+enum { SKRIT_PROTO_FWD = 0x01 }; // device forwards this interface's RX to the host
 
 // ---- REBOOT modes ----
 enum { SKRIT_REBOOT_APP = 0, SKRIT_REBOOT_BOOTLOADER = 1 };
