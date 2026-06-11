@@ -49,10 +49,19 @@ extern "C" {
 #include "skrit_device.h"
 }
 
+// Sniffer variants (e.g. -DDUTA_SNIFF_BLE_ESP): the portable contract + backend
+// selection. When a backend is selected this defines DUTA_SNIFFER / DUTA_SNIFF_KIND
+// and binds duta_sniffer_*(); DATA becomes captured radio frames instead of the
+// UART bridge, and WiFi/I2C are compiled out to leave room for the radio stack.
+#include "duta_sniffer.h"
+
 #include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
+#ifndef DUTA_SNIFFER
 #include "duta_i2c.h"    // I2C master DATA backend (Wire) — the first non-UART medium
 #include "duta_wifi.h"   // WiFi + WebSocket bridge + captive portal (second skrit_dev)
+#endif
 
+#ifndef DUTA_SNIFFER // UART/I2C DATA bridge + WiFi config — replaced by the radio sniffer
 // The bridged medium: SKRIT_DATA_UART (console tee) or SKRIT_DATA_I2C (master +
 // transaction records). Switched via CFG_DATA_KIND, persisted in NVS ("dkind").
 static uint8_t g_data_kind = SKRIT_DATA_UART;
@@ -101,6 +110,7 @@ static uint8_t hal_cfg_set(void *, uint8_t key, const uint8_t *val, uint8_t len)
   }
   return duta_wifi_cfg_set(key, val, len);
 }
+#endif // !DUTA_SNIFFER
 
 // (I2C HAL shims live below the dev declarations — they fan records to the links.)
 
@@ -120,6 +130,7 @@ static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
 
 static skrit_dev dev;
 
+#ifndef DUTA_SNIFFER
 // ---- I2C HAL shims: do the transfer, then fan the record out to every link --
 static void i2c_emit_record(uint8_t addr, uint8_t flags, const uint8_t *w, uint8_t wlen,
                             const uint8_t *r, uint8_t rlen) {
@@ -139,6 +150,7 @@ static uint8_t hal_i2c_xfer(void *, uint8_t addr, const uint8_t *w, uint8_t wlen
                     st == SKRIT_ST_OK ? rlen : 0);
   return st;
 }
+#endif // !DUTA_SNIFFER
 
 // Translate (bits,parity,stop) into the Arduino SerialConfig word, covering the
 // configs people actually use; falls back to 8N1.
@@ -162,7 +174,11 @@ static void beginTarget() {
 // HWCDC already FIFO-drops when no host is draining; the TX timeout set in
 // setup() caps any residual stall, so this never blocks the loop.
 static void hal_link_write(void *, const uint8_t *p, uint16_t n) { Serial.write(p, n); }
+#ifdef DUTA_SNIFFER
+static void hal_data_write(void *, const uint8_t *, uint16_t) {} // sniffer DATA is RX-only
+#else
 static void hal_data_write(void *, const uint8_t *p, uint16_t n) { TARGET.write(p, n); }
+#endif
 
 static uint16_t hal_data_read(void *, uint8_t *out, uint16_t cap) {
   uint16_t k = 0;
@@ -250,6 +266,7 @@ static skrit_hal HAL = {
     hal_millis, hal_pump,
 };
 
+#ifndef DUTA_SNIFFER
 // Switch the bridged medium live: both devs read their HALs by pointer.
 static void data_kind_apply(uint8_t kind) {
   g_data_kind = kind;
@@ -258,8 +275,39 @@ static void data_kind_apply(uint8_t kind) {
   if (kind == SKRIT_DATA_I2C) duta_i2c_begin();
   else duta_i2c_end();
 }
+#endif
 
 // ---- Arduino entry points --------------------------------------------------
+#ifdef DUTA_SNIFFER
+// Sniffer build (e.g. -DDUTA_SNIFF_BLE_ESP): DATA is captured radio frames, not a
+// UART/I2C bridge, and there's no WiFi — just the mux + CMD over USB-CDC and the
+// radio backend behind duta_sniffer.h. Mirrors the Zephyr sniffer main loop.
+void setup() {
+  duta_io_begin(); // onboard RGB/LED sign-of-life from the board table
+  Serial.begin(115200);
+#if BOARD_HAS_NATIVE_USB
+  Serial.setTxTimeoutMs(50); // HWCDC: cap stalls so a quiet host can't wedge the loop
+#endif
+  HAL.n_outputs = duta_tbl_n;
+  HAL.caps = board_caps();
+  HAL.data_kind = DUTA_SNIFF_KIND; // DATA is captured radio frames
+  HAL.pwm_config_get = duta_io_pwm_config_get;
+  HAL.pwm_config_set = duta_io_pwm_config_set;
+  HAL.pin_caps = duta_io_pin_caps;
+  HAL.config_get = duta_io_config_get;
+  HAL.config_set = duta_io_config_set;
+  skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
+  duta_sniffer_init();
+  duta_sniffer_start();
+}
+
+void loop() {
+  uint8_t rec[2 + 64]; // one ble-sniff record: header(2)+AdvA(6)+adv(<=31) fits easily
+  uint16_t n;
+  while ((n = duta_sniffer_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
+  while (Serial.available()) skrit_dev_rx(&dev, (uint8_t)Serial.read());
+}
+#else
 void setup() {
   duta_io_begin(); // configure every output/input from the board table
   if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
@@ -307,3 +355,4 @@ void loop() {
   while (Serial.available()) skrit_dev_rx(&dev, (uint8_t)Serial.read());
   duta_wifi_loop(); // WiFi state machine + WS server pump
 }
+#endif // DUTA_SNIFFER

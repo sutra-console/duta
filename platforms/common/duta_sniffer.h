@@ -62,13 +62,25 @@
 #define DUTA_SNIFF_HAS_CHANNEL 1
 #define DUTA_SNIFF_HAS_TX 1
 
+// ---- ESP32 BLE advertising sniffer (espressif/Arduino; controller passive scan) -
+#elif defined(DUTA_SNIFF_BLE_ESP)
+#include "duta_ble_sniff_esp.h"
+#define DUTA_SNIFFER 1
+#define DUTA_SNIFF_KIND SKRIT_DATA_BLE_SNIFF
+#define duta_sniffer_init duta_ble_sniff_esp_init
+#define duta_sniffer_start duta_ble_sniff_esp_start
+#define duta_sniffer_stop duta_ble_sniff_esp_stop
+#define duta_sniffer_is_on duta_ble_sniff_esp_is_on
+#define duta_sniffer_take duta_ble_sniff_esp_take
+// Scan-based: advertising only, RX-only (no DUTA_SNIFF_HAS_TX), channel hopped
+// internally by the controller (no DUTA_SNIFF_HAS_CHANNEL). Same DATA records,
+// different radio — proof the contract spans chips, not just the nRF.
+
 // ---- add a new backend here -------------------------------------------------
 // #elif defined(DUTA_SNIFF_ESP154)        // example: ESP32 802.15.4 promiscuous
 // #include "duta_esp154_sniff.h"
 // #define DUTA_SNIFFER 1
-// #define DUTA_SNIFF_KIND SKRIT_DATA_IEEE802154
-// #define duta_sniffer_init  duta_esp154_sniff_init
-// ... (map the rest + DUTA_SNIFF_HAS_* as supported) ...
+// ... (map duta_sniffer_* + DUTA_SNIFF_KIND + DUTA_SNIFF_HAS_* as supported) ...
 
 #endif
 
