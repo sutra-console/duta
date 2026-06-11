@@ -54,6 +54,18 @@ is future work.
 
 (Run inside a Zephyr workspace, or point `ZEPHYR_BASE` at one.)
 
+### Sniffer backends are pluggable
+
+Both sniffers sit behind a portable contract in
+[`platforms/common/duta_sniffer.h`](../common/duta_sniffer.h): `main.c` calls only
+`duta_sniffer_init/start/stop/is_on/take` (+ `_tx`/`_set_channel`/`_get_channel`
+when `DUTA_SNIFF_HAS_TX`/`DUTA_SNIFF_HAS_CHANNEL` are set) and reads
+`DUTA_SNIFF_KIND` — it never names a concrete backend. A new radio (an ESP32
+802.15.4 PHY, a CC2531, an nRF24) becomes a sniffer by implementing that handful
+of functions and adding one selection arm to the facade; the app loop is unchanged.
+The nRF backends here (`duta_154_sniff.c`, `duta_ble_sniff.c`) are the reference
+implementations.
+
 ## Transport
 
 DATA + CMD are **multiplexed over one channel** ([skrit-mux](../../protocol/PROTOCOL.md)),

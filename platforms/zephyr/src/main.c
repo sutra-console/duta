@@ -31,34 +31,19 @@
 #define SKRIT_SEND_CAP 200
 #endif
 #include "skrit_device.h"
-// Sniffer variants drive the nRF radio directly and replace the UART DATA bridge
-// with captured radio frames. One backend at a time, selected at build time; both
-// expose the same sniff_* surface so the loop below is backend-agnostic.
+// Sniffer variants drive a radio directly and replace the UART DATA bridge with
+// captured frames. The portable contract + backend selection lives in
+// duta_sniffer.h: it binds the active backend to duta_sniffer_*() and defines
+// DUTA_SNIFFER / DUTA_SNIFF_KIND / DUTA_SNIFF_HAS_TX|CHANNEL, so the loop below is
+// fully backend-agnostic (no nRF/154 names here).
+#include "duta_sniffer.h"
+
 #define DUTA_N_GPIO_OUT 1 // onboard status LED (led0) — the onboard-only default
-#if defined(CONFIG_DUTA_SNIFF) || defined(CONFIG_DUTA_SNIFF_154)
-#define DUTA_SNIFFER 1
+#ifdef DUTA_SNIFFER
 #define SNIFF_OUT_IDX DUTA_N_GPIO_OUT // a virtual "Sniffing" output past the gpios
 #define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 1)
 #else
 #define DUTA_N_OUTPUTS DUTA_N_GPIO_OUT
-#endif
-
-#ifdef CONFIG_DUTA_SNIFF
-#include "duta_ble_sniff.h"
-#define SNIFF_KIND SKRIT_DATA_BLE_SNIFF
-#define sniff_init duta_sniff_init
-#define sniff_start duta_sniff_start
-#define sniff_stop duta_sniff_stop
-#define sniff_is_on duta_sniff_is_on
-#define sniff_take duta_sniff_take
-#elif defined(CONFIG_DUTA_SNIFF_154)
-#include "duta_154_sniff.h"
-#define SNIFF_KIND SKRIT_DATA_IEEE802154
-#define sniff_init duta_154_sniff_init
-#define sniff_start duta_154_sniff_start
-#define sniff_stop duta_154_sniff_stop
-#define sniff_is_on duta_154_sniff_is_on
-#define sniff_take duta_154_sniff_take
 #endif
 
 #define FW_LO 0x04
@@ -294,9 +279,9 @@ static void transport_start(void) {
 // ---- DATA console + control HAL (shared by both transports) ----------------
 static void hal_data_write(void *c, const uint8_t *p, uint16_t n) {
   ARG_UNUSED(c);
-#ifdef CONFIG_DUTA_SNIFF_154
+#ifdef DUTA_SNIFF_HAS_TX
   // The "wire" is the radio: a host DATA write is a frame to inject over the air.
-  duta_154_sniff_tx(p, n);
+  duta_sniffer_tx(p, n);
   return;
 #endif
   if (!data_dev) return;
@@ -315,8 +300,8 @@ static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
   ARG_UNUSED(c);
 #ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) { // virtual "Sniffing" toggle drives the radio
-    if (on) sniff_start();
-    else sniff_stop();
+    if (on) duta_sniffer_start();
+    else duta_sniffer_stop();
     return;
   }
 #endif
@@ -327,7 +312,7 @@ static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
 static uint8_t hal_out_get(void *c, uint8_t idx) {
   ARG_UNUSED(c);
 #ifdef DUTA_SNIFFER
-  if (idx == SNIFF_OUT_IDX) return sniff_is_on() ? 1 : 0;
+  if (idx == SNIFF_OUT_IDX) return duta_sniffer_is_on() ? 1 : 0;
 #endif
   return idx < DUTA_N_GPIO_OUT ? g_out[idx] : 0;
 }
@@ -367,9 +352,9 @@ static uint16_t hal_in_get(void *c, uint8_t idx) {
 static void hal_proto_get(void *c, uint8_t idx, uint32_t *value, uint8_t *o0, uint8_t *o1, uint8_t *o2) {
   ARG_UNUSED(c);
   ARG_UNUSED(idx); // single interface
-#ifdef CONFIG_DUTA_SNIFF_154
+#ifdef DUTA_SNIFF_HAS_CHANNEL
   // No UART here — a radio sniffer's link param is its channel (11..26; 0 = hop).
-  *value = duta_154_sniff_get_channel();
+  *value = duta_sniffer_get_channel();
   *o0 = 0;
   *o1 = 0;
   *o2 = 0;
@@ -383,11 +368,11 @@ static void hal_proto_get(void *c, uint8_t idx, uint32_t *value, uint8_t *o0, ui
 static void hal_proto_set(void *c, uint8_t idx, uint32_t value, uint8_t o0, uint8_t o1, uint8_t o2) {
   ARG_UNUSED(c);
   ARG_UNUSED(idx);
-#ifdef CONFIG_DUTA_SNIFF_154
+#ifdef DUTA_SNIFF_HAS_CHANNEL
   ARG_UNUSED(o0);
   ARG_UNUSED(o1);
   ARG_UNUSED(o2);
-  duta_154_sniff_set_channel((uint8_t)value); // value carries the 802.15.4 channel
+  duta_sniffer_set_channel((uint8_t)value); // value carries the 802.15.4 channel
   return;
 #endif
   if (value) g_baud = value;
@@ -452,7 +437,7 @@ static const skrit_hal HAL = {
     .name = "Duta nRF52840",
     .fw_ver = (FW_HI << 8) | FW_LO,
 #ifdef DUTA_SNIFFER
-    .data_kind = SNIFF_KIND, // DATA is captured radio frames, not a UART console
+    .data_kind = DUTA_SNIFF_KIND, // DATA is captured radio frames, not a UART console
 #endif
     .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
@@ -509,14 +494,14 @@ int main(void) {
 #ifdef DUTA_SNIFFER
   // Sniffer build: DATA is captured radio frames (no UART). Poll the radio and
   // emit each frame as a DATA record; CMD still works over the same mux link.
-  // The "Sniffing" virtual output (index 3) starts/stops capture; default on.
+  // The "Sniffing" virtual output (SNIFF_OUT_IDX) starts/stops capture; default on.
   // rec must hold the largest record: 802.15.4 is 9 + up-to-127-byte PSDU.
-  sniff_init();
-  sniff_start();
+  duta_sniffer_init();
+  duta_sniffer_start();
   static uint8_t rec[160]; // static: keep the 802.15.4-sized record off the stack
   for (;;) {
     uint16_t n;
-    while ((n = sniff_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
+    while ((n = duta_sniffer_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
     unsigned char b;
     while (uart_poll_in(cmd_dev, &b) == 0) skrit_dev_rx(&dev, (uint8_t)b);
     k_yield();
