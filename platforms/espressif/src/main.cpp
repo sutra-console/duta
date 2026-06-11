@@ -49,6 +49,8 @@ extern "C" {
 #include "skrit_device.h"
 }
 
+#include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
+
 #if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
 #include "soc/rtc_cntl_reg.h" // RTC_CNTL_OPTION1_REG: force download (DFU) boot
 #endif
@@ -78,9 +80,14 @@ static uint32_t serialConfig(uint8_t bits, uint8_t par, uint8_t stop) {
 
 static void beginTarget() {
   TARGET.begin(g_baud, serialConfig(g_bits, g_parity, g_stop), DATA_RX_PIN, DATA_TX_PIN);
+  // Pull the RX line up (without disturbing the UART matrix routing): a
+  // floating RX with no target wired streams garbage into the bridge.
+  gpio_pullup_en((gpio_num_t)DATA_RX_PIN);
 }
 
 // ---- transport + serial HAL (IO callbacks come from duta_io_arduino.h) ------
+// HWCDC already FIFO-drops when no host is draining; the TX timeout set in
+// setup() caps any residual stall, so this never blocks the loop.
 static void hal_link_write(void *, const uint8_t *p, uint16_t n) { Serial.write(p, n); }
 static void hal_data_write(void *, const uint8_t *p, uint16_t n) { TARGET.write(p, n); }
 
@@ -175,6 +182,14 @@ void setup() {
   if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
 
   Serial.begin(115200); // USB-CDC (S3/C3) or UART0-USB (classic): the mux link
+#if BOARD_HAS_NATIVE_USB
+  // HWCDC: cap write stalls so a host that stops draining can't wedge the loop.
+  // NOTE for hosts: the USB-Serial/JTAG converts DTR/RTS edge patterns into
+  // chip reset / download-mode entry (rst:0x15, boot:0x0) and firmware cannot
+  // disable it — assert DTR only, never toggle RTS on a running Duta, and drop
+  // both lines before closing the port (Sutra does). esptool still works.
+  Serial.setTxTimeoutMs(50);
+#endif
   beginTarget();
 
   HAL.n_outputs = duta_tbl_n; // a provisioned table may differ from the compiled default

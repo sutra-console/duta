@@ -72,6 +72,17 @@ addressable RGB output via FastLED, per-pixel, raise `RGB_COUNT` for a strip) ·
 bootloaders) · `REBOOT` (app, or download/DFU on native-USB chips) ·
 `MACRO_WRITE_*`/`MACRO_RUN` for scratch (`0xFF`) push-and-run.
 
+## Host gotcha: DTR/RTS on native USB
+
+The USB-Serial/JTAG peripheral converts host DTR/RTS **edge patterns** into chip
+reset and download-mode entry (`rst:0x15`, `boot:0x0 waiting for download`) — and
+firmware **cannot disable it** (the `RTC_CNTL_USB_RESET_DISABLE` bit does not gate
+it; hardware-verified). A custom host talking to a running Duta must **assert DTR
+only, never toggle RTS, and drop both lines before closing the port** — otherwise
+the close/reopen of an ordinary reconnect parks the chip in the ROM downloader
+until it is reflashed or power-cycled. Sutra follows this discipline; esptool
+keeps working (it *wants* the reset behavior).
+
 ## Toolchain notes
 
 - **FastLED is pinned to 3.9.13**: 3.10+ ships an audio module that doesn't compile
