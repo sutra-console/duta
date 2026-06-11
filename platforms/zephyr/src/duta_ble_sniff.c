@@ -22,6 +22,7 @@ static uint8_t rx_buf[2 + 257];                  // header(2) + max payload
 static const uint8_t adv_chan[3] = {37, 38, 39}; // BLE advertising channel indices
 static const uint8_t adv_freq[3] = {2, 26, 80};  // 2402 / 2426 / 2480 MHz (FREQUENCY reg)
 static uint8_t chan_i;
+static bool sniff_active; // start/stop gate (the "Sniffing" virtual output)
 
 static void radio_arm(uint8_t i) {
   NRF_RADIO->FREQUENCY = adv_freq[i];
@@ -52,12 +53,28 @@ void duta_sniff_init(void) {
   NRF_RADIO->PACKETPTR = (uint32_t)rx_buf;
   NRF_RADIO->SHORTS = RADIO_SHORTS_READY_START_Msk | RADIO_SHORTS_END_DISABLE_Msk |
                       RADIO_SHORTS_ADDRESS_RSSISTART_Msk;
+}
+
+void duta_sniff_start(void) {
+  if (sniff_active) return;
+  sniff_active = true;
   chan_i = 0;
   radio_arm(chan_i);
 }
 
+void duta_sniff_stop(void) {
+  if (!sniff_active) return;
+  sniff_active = false;
+  NRF_RADIO->TASKS_DISABLE = 1;
+  uint32_t guard = 100000;
+  while (NRF_RADIO->STATE != RADIO_STATE_STATE_Disabled && guard--) { /* settle */ }
+  NRF_RADIO->EVENTS_END = 0;
+}
+
+bool duta_sniff_is_on(void) { return sniff_active; }
+
 uint16_t duta_sniff_take(uint8_t *out, uint16_t cap) {
-  if (!NRF_RADIO->EVENTS_END) return 0; // nothing captured since last call
+  if (!sniff_active || !NRF_RADIO->EVENTS_END) return 0; // stopped, or nothing captured
   NRF_RADIO->EVENTS_END = 0;
 
   uint8_t crc_ok = (uint8_t)(NRF_RADIO->CRCSTATUS & 1u);

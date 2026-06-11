@@ -28,6 +28,10 @@
 #include "skrit_device.h"
 #ifdef CONFIG_DUTA_SNIFF
 #include "duta_ble_sniff.h"
+#define SNIFF_OUT_IDX 3     // a virtual "Sniffing" output (start/stop) past the 3 gpios
+#define DUTA_N_OUTPUTS 4
+#else
+#define DUTA_N_OUTPUTS 3
 #endif
 
 #define FW_LO 0x04
@@ -277,16 +281,33 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
 
 static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
   ARG_UNUSED(c);
+#ifdef CONFIG_DUTA_SNIFF
+  if (idx == SNIFF_OUT_IDX) { // virtual "Sniffing" toggle drives the radio
+    if (on) duta_sniff_start();
+    else duta_sniff_stop();
+    return;
+  }
+#endif
   if (idx > 2) return;
   g_out[idx] = on ? 1 : 0;
   if (device_is_ready(out_gpio[idx].port)) gpio_pin_set_dt(&out_gpio[idx], on ? 1 : 0);
 }
 static uint8_t hal_out_get(void *c, uint8_t idx) {
   ARG_UNUSED(c);
+#ifdef CONFIG_DUTA_SNIFF
+  if (idx == SNIFF_OUT_IDX) return duta_sniff_is_on() ? 1 : 0;
+#endif
   return idx < 3 ? g_out[idx] : 0;
 }
 static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
   ARG_UNUSED(c);
+#ifdef CONFIG_DUTA_SNIFF
+  if (idx == SNIFF_OUT_IDX) {
+    *type = SKRIT_CTRL_IO;
+    *name = "Sniffing";
+    return;
+  }
+#endif
   if (idx > 2) return;
   *type = SKRIT_CTRL_IO;
   *name = OUT_NAME[idx];
@@ -381,7 +402,7 @@ static const skrit_hal HAL = {
     .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
     .store_kb = 0,
-    .n_outputs = 3,
+    .n_outputs = DUTA_N_OUTPUTS,
     .n_inputs = DUTA_N_INPUTS,
     .link_write = hal_link_write,
     .data_write = hal_data_write,
@@ -433,7 +454,9 @@ int main(void) {
 #ifdef CONFIG_DUTA_SNIFF
   // BLE sniffer: DATA is captured advertising PDUs (no UART). Poll the radio and
   // emit each packet as a DATA record; CMD still works over the same mux link.
+  // The "Sniffing" virtual output (index 3) starts/stops capture; default on.
   duta_sniff_init();
+  duta_sniff_start();
   for (;;) {
     uint8_t rec[64];
     uint16_t n;
