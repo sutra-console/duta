@@ -16,6 +16,7 @@
 #define RELAY2_PIN 5
 #define LED_PIN 6 // external aux LED (no plain onboard LED)
 #define RGB_PIN ONBOARD_WS2812_PIN // fixed GP21: always the RGB
+#define RGB_ORDER ONBOARD_WS2812_ORDER
 #define RGB_COUNT 1
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)

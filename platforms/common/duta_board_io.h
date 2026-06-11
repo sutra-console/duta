@@ -29,6 +29,9 @@
 #if RGB_PIN >= 0
 #define DUTA_RGB_PIN RGB_PIN // FastLED needs the pin as a compile-time arg
 #define DUTA_RGB_COUNT RGB_COUNT
+#ifdef RGB_ORDER
+#define DUTA_RGB_ORDER RGB_ORDER // board-specific color order (default GRB)
+#endif
 #endif
 
 static const duta_io duta_outputs[] = {

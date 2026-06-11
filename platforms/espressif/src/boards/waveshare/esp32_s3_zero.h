@@ -22,6 +22,9 @@ static const int16_t duta_board_broken_out[] = {
 // it's always the RGB LED, never provisionable. The BOOT button owns GP0
 // (not exposed either; listed for documentation).
 #define ONBOARD_WS2812_PIN 21
+// Waveshare wires this pixel in RGB order (not the usual WS2812 GRB) — same as
+// their other S3 boards (the S3-Pico FAQ documents the red/green swap).
+#define ONBOARD_WS2812_ORDER RGB
 static const duta_pin_use duta_board_uses[] = {
     {ONBOARD_WS2812_PIN, DUTA_USE_FIXED, "onboard WS2812"},
     {0, DUTA_USE_FIXED, "BOOT button"},

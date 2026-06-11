@@ -65,6 +65,11 @@ static uint8_t duta_tbl_n = DUTA_N_OUTPUTS;
 #ifndef DUTA_RGB_COUNT
 #define DUTA_RGB_COUNT 1
 #endif
+// Color order is a board fact: most WS2812 are GRB, but some onboard pixels
+// (e.g. Waveshare's S3 boards) want RGB. Boards override via RGB_ORDER.
+#ifndef DUTA_RGB_ORDER
+#define DUTA_RGB_ORDER GRB
+#endif
 static CRGB duta_leds[DUTA_RGB_COUNT];
 #define DUTA_HAS_RGB 1
 #else
@@ -449,7 +454,7 @@ static inline void duta_io_begin(void) {
   }
   duta__pwm_apply(); // default PWM frequency + resolution (per-pin on esp32 core 3.x)
 #if DUTA_HAS_RGB
-  FastLED.addLeds<WS2812, DUTA_RGB_PIN, GRB>(duta_leds, DUTA_RGB_COUNT);
+  FastLED.addLeds<WS2812, DUTA_RGB_PIN, DUTA_RGB_ORDER>(duta_leds, DUTA_RGB_COUNT);
   FastLED.setBrightness(255);
   FastLED.clear(true);
 #endif
