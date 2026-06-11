@@ -52,16 +52,27 @@ extern "C" {
 // Sniffer variants (e.g. -DDUTA_SNIFF_BLE_ESP): the portable contract + backend
 // selection. When a backend is selected this defines DUTA_SNIFFER / DUTA_SNIFF_KIND
 // and binds duta_sniffer_*(); DATA becomes captured radio frames instead of the
-// UART bridge, and WiFi/I2C are compiled out to leave room for the radio stack.
+// UART bridge.
 #include "duta_sniffer.h"
+// BLE GATT transport variant (-DDUTA_BLE_TRANSPORT): the host link is BLE instead
+// of USB/WiFi (the target UART console is still bridged, over the DATA service).
+#ifdef DUTA_BLE_TRANSPORT
+#include "duta_ble.h"
+#endif
+
+// Radio-only links (the BLE sniffer or the BLE transport) compile out WiFi/I2C to
+// leave room for the BLE stack and keep the build single-purpose.
+#if defined(DUTA_SNIFFER) || defined(DUTA_BLE_TRANSPORT)
+#define DUTA_NO_NET 1
+#endif
 
 #include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
-#ifndef DUTA_SNIFFER
+#ifndef DUTA_NO_NET
 #include "duta_i2c.h"    // I2C master DATA backend (Wire) — the first non-UART medium
 #include "duta_wifi.h"   // WiFi + WebSocket bridge + captive portal (second skrit_dev)
 #endif
 
-#ifndef DUTA_SNIFFER // UART/I2C DATA bridge + WiFi config — replaced by the radio sniffer
+#ifndef DUTA_NO_NET // UART/I2C DATA bridge + WiFi config — not in a radio-only build
 // The bridged medium: SKRIT_DATA_UART (console tee) or SKRIT_DATA_I2C (master +
 // transaction records). Switched via CFG_DATA_KIND, persisted in NVS ("dkind").
 static uint8_t g_data_kind = SKRIT_DATA_UART;
@@ -130,7 +141,7 @@ static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
 
 static skrit_dev dev;
 
-#ifndef DUTA_SNIFFER
+#ifndef DUTA_NO_NET
 // ---- I2C HAL shims: do the transfer, then fan the record out to every link --
 static void i2c_emit_record(uint8_t addr, uint8_t flags, const uint8_t *w, uint8_t wlen,
                             const uint8_t *r, uint8_t rlen) {
@@ -266,7 +277,7 @@ static skrit_hal HAL = {
     hal_millis, hal_pump,
 };
 
-#ifndef DUTA_SNIFFER
+#ifndef DUTA_NO_NET
 // Switch the bridged medium live: both devs read their HALs by pointer.
 static void data_kind_apply(uint8_t kind) {
   g_data_kind = kind;
@@ -275,6 +286,14 @@ static void data_kind_apply(uint8_t kind) {
   if (kind == SKRIT_DATA_I2C) duta_i2c_begin();
   else duta_i2c_end();
 }
+#endif
+
+#ifdef DUTA_BLE_TRANSPORT
+// Dual-channel BLE transport HAL: CMD responses + DATA console each notify their
+// own GATT service; host->target console writes arrive via the DATA-RX callback.
+static void ble_cmd_link_write(void *, const uint8_t *p, uint16_t n) { duta_ble::cmd_notify(p, n); }
+static void ble_data_host_write(void *, const uint8_t *p, uint16_t n) { duta_ble::data_notify(p, n); }
+static void ble_data_sink(const uint8_t *p, uint16_t n) { TARGET.write(p, n); }
 #endif
 
 // ---- Arduino entry points --------------------------------------------------
@@ -306,6 +325,33 @@ void loop() {
   uint16_t n;
   while ((n = duta_sniffer_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
   while (Serial.available()) skrit_dev_rx(&dev, (uint8_t)Serial.read());
+}
+#elif defined(DUTA_BLE_TRANSPORT)
+// BLE transport build: the host link is the two skrit GATT services (paired +
+// encrypted); the target UART console is bridged out over the DATA service. No
+// USB-mux, no WiFi. Mirrors the nRF BLE transport.
+void setup() {
+  duta_io_begin();
+  if (DTR_PIN >= 0) pinMode(DTR_PIN, OUTPUT);
+  if (RTS_PIN >= 0) pinMode(RTS_PIN, OUTPUT);
+  Serial.begin(115200); // keep USB-CDC enumerated for flashing; not the link
+  beginTarget();        // the DATA console is still the target UART
+  HAL.n_outputs = duta_tbl_n;
+  HAL.caps = (uint8_t)(board_caps() & ~(uint8_t)SKRIT_CAP_MUX); // dual-channel, not muxed
+  HAL.pwm_config_get = duta_io_pwm_config_get;
+  HAL.pwm_config_set = duta_io_pwm_config_set;
+  HAL.pin_caps = duta_io_pin_caps;
+  HAL.config_get = duta_io_config_get;
+  HAL.config_set = duta_io_config_set;
+  HAL.link_write = ble_cmd_link_write;  // device->host CMD responses/events
+  HAL.host_write = ble_data_host_write; // device->host DATA console (its own pipe)
+  skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 0);
+  duta_ble::init(&dev, ble_data_sink);
+}
+
+void loop() {
+  skrit_dev_poll(&dev); // read the target console -> DATA notify (host_write)
+  duta_ble::loop();     // drain the TX rings to the radio
 }
 #else
 void setup() {
