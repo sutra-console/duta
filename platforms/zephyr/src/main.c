@@ -96,6 +96,10 @@ static skrit_dev dev;
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
+#include <zephyr/sys/ring_buffer.h> // queued TX so a full controller never drops bytes
+#if defined(CONFIG_SETTINGS)
+#include <zephyr/settings/settings.h> // persist BLE bonds across reboots
+#endif
 
 // BLE is dual-channel (like dual-CDC): two skrit GATT services. DATA carries
 // the raw console (its UUID is NUS-compatible so plain BLE-UART terminals read
@@ -154,25 +158,29 @@ static void cmd_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value) {
 
 // attrs per service: [0]=service [1]=TX decl [2]=TX value [3]=CCC [4]=RX decl
 // [5]=RX value. We notify on the TX value attribute (attrs[2]).
+// The RX (write) and CCC (subscribe) attributes require an ENCRYPTED link, so a
+// central must complete LESC pairing before it can drive the device or receive
+// notifications — the air link is never plaintext. (The TX value attr stays
+// PERM_NONE: it's only ever pushed via bt_gatt_notify, which checks the CCC.)
 BT_GATT_SERVICE_DEFINE(data_svc, BT_GATT_PRIMARY_SERVICE(&data_svc_uuid),
                        BT_GATT_CHARACTERISTIC(&data_tx_uuid.uuid, BT_GATT_CHRC_NOTIFY,
                                               BT_GATT_PERM_NONE, NULL, NULL, NULL),
-                       BT_GATT_CCC(data_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+                       BT_GATT_CCC(data_ccc_changed,
+                                   BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
                        BT_GATT_CHARACTERISTIC(&data_rx_uuid.uuid,
                                               BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-                                              BT_GATT_PERM_WRITE, NULL, data_rx, NULL));
+                                              BT_GATT_PERM_WRITE_ENCRYPT, NULL, data_rx, NULL));
 BT_GATT_SERVICE_DEFINE(cmd_svc, BT_GATT_PRIMARY_SERVICE(&cmd_svc_uuid),
                        BT_GATT_CHARACTERISTIC(&cmd_tx_uuid.uuid, BT_GATT_CHRC_NOTIFY,
                                               BT_GATT_PERM_NONE, NULL, NULL, NULL),
-                       BT_GATT_CCC(cmd_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+                       BT_GATT_CCC(cmd_ccc_changed,
+                                   BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
                        BT_GATT_CHARACTERISTIC(&cmd_rx_uuid.uuid,
                                               BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-                                              BT_GATT_PERM_WRITE, NULL, cmd_rx, NULL));
+                                              BT_GATT_PERM_WRITE_ENCRYPT, NULL, cmd_rx, NULL));
 
-static const struct bt_data ble_ad[] = {
-    BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-    BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
-};
+// Per-unit advertised name "Duta-XXXX", filled from the BLE address at runtime.
+static char duta_name[16] = "Duta";
 static const struct bt_data ble_sd[] = {
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, CMD_SVC), // scan rsp: the skrit CMD UUID identifies us
 };
@@ -184,8 +192,23 @@ static const struct bt_data ble_sd[] = {
 #endif
 
 static void ble_advertise(void) {
-  int err = bt_le_adv_start(BT_LE_ADV_CONN, ble_ad, ARRAY_SIZE(ble_ad), ble_sd, ARRAY_SIZE(ble_sd));
+  // Build the adv data each time so it carries the current dynamic name.
+  struct bt_data ad[] = {
+      BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+      BT_DATA(BT_DATA_NAME_COMPLETE, duta_name, strlen(duta_name)),
+  };
+  int err = bt_le_adv_start(BT_LE_ADV_CONN, ad, ARRAY_SIZE(ad), ble_sd, ARRAY_SIZE(ble_sd));
   if (err) printk("Duta: adv start failed (%d)\n", err);
+}
+
+// Give each unit a distinct name from its BLE address: "Duta-XXXX". Sets both the
+// advertised name and the GAP Device Name characteristic.
+static void set_device_name(void) {
+  bt_addr_le_t addr;
+  size_t count = 1;
+  bt_id_get(&addr, &count);
+  snprintk(duta_name, sizeof duta_name, "Duta-%02X%02X", addr.a.val[1], addr.a.val[0]);
+  bt_set_name(duta_name);
 }
 
 static void ble_connected(struct bt_conn *conn, uint8_t err) {
@@ -204,27 +227,61 @@ static void ble_disconnected(struct bt_conn *conn, uint8_t reason) {
 }
 BT_CONN_CB_DEFINE(ble_conn_cb) = {.connected = ble_connected, .disconnected = ble_disconnected};
 
-// notify helper, chunked to the negotiated ATT MTU.
-static void ble_notify(const struct bt_gatt_attr *tx_attr, bool subscribed, const uint8_t *p,
-                       uint16_t n) {
-  if (!ble_conn || !subscribed) return;
+// Device -> host TX is queued, not pushed straight to the radio: bt_gatt_notify
+// fails when the controller's buffers are full, and the old path dropped those
+// bytes (corrupting a COBS frame). Instead each pipe has a ring buffer that the
+// BLE loop drains, retrying when buffers free up — no lost console/CMD bytes
+// under burst. Pushes can come from the BT RX thread (CMD responses) and the
+// main loop (events / DATA), so the put side is spinlock-guarded; the single
+// consumer is the loop's txq_drain.
+RING_BUF_DECLARE(cmd_tx_rb, 768);
+RING_BUF_DECLARE(data_tx_rb, 1024);
+static struct k_spinlock tx_lock;
+
+static void txq_push(struct ring_buf *rb, const uint8_t *p, uint16_t n) {
+  k_spinlock_key_t k = k_spin_lock(&tx_lock);
+  ring_buf_put(rb, p, n); // bounded: extreme overrun drops the tail, never corrupts the head
+  k_spin_unlock(&tx_lock, k);
+}
+
+// Drain one pipe to its TX characteristic, chunked to the negotiated ATT MTU.
+// Peek -> notify -> consume-on-success, so a full controller just retries later.
+static void txq_drain(struct ring_buf *rb, const struct bt_gatt_attr *tx_attr, bool subscribed) {
+  if (!ble_conn) return;
+  if (!subscribed) { // nobody listening: discard so the queue can't wedge
+    k_spinlock_key_t k = k_spin_lock(&tx_lock);
+    ring_buf_reset(rb);
+    k_spin_unlock(&tx_lock, k);
+    return;
+  }
   uint16_t mtu = bt_gatt_get_mtu(ble_conn);
   uint16_t chunk = (mtu > 3) ? (uint16_t)(mtu - 3) : 20;
-  while (n) {
-    uint16_t c2 = n < chunk ? n : chunk;
-    if (bt_gatt_notify(ble_conn, tx_attr, p, c2)) break; // buffers full -> drop (scaffold)
-    p += c2;
-    n -= c2;
+  uint8_t tmp[247];
+  if (chunk > sizeof tmp) chunk = sizeof tmp;
+  for (;;) {
+    k_spinlock_key_t k = k_spin_lock(&tx_lock);
+    uint32_t got = ring_buf_peek(rb, tmp, chunk);
+    k_spin_unlock(&tx_lock, k);
+    if (got == 0) break;
+    if (bt_gatt_notify(ble_conn, tx_attr, tmp, (uint16_t)got)) break; // full: leave queued, retry
+    k = k_spin_lock(&tx_lock);
+    ring_buf_get(rb, NULL, got); // consume the bytes we just sent
+    k_spin_unlock(&tx_lock, k);
   }
 }
+static void ble_tx_drain(void) {
+  txq_drain(&cmd_tx_rb, &cmd_svc.attrs[2], cmd_subscribed);
+  txq_drain(&data_tx_rb, &data_svc.attrs[2], data_subscribed);
+}
+
 // device -> host CMD responses (link_write) and DATA console out (host_write).
 static void hal_link_write(void *c, const uint8_t *p, uint16_t n) {
   ARG_UNUSED(c);
-  ble_notify(&cmd_svc.attrs[2], cmd_subscribed, p, n);
+  txq_push(&cmd_tx_rb, p, n);
 }
 static void ble_data_notify(void *c, const uint8_t *p, uint16_t n) {
   ARG_UNUSED(c);
-  ble_notify(&data_svc.attrs[2], data_subscribed, p, n);
+  txq_push(&data_tx_rb, p, n);
 }
 
 static void transport_start(void) {
@@ -233,6 +290,10 @@ static void transport_start(void) {
     printk("Duta: bt_enable failed (%d)\n", err);
     return;
   }
+#if defined(CONFIG_SETTINGS)
+  settings_load(); // restore persisted bonds so paired hosts reconnect without re-pairing
+#endif
+  set_device_name();
   ble_advertise();
 }
 
@@ -479,10 +540,12 @@ int main(void) {
   transport_start();
 
 #if defined(CONFIG_BT)
-  // BLE: received bytes arrive via the GATT write callbacks (data_rx/cmd_rx);
-  // the loop only tees the target console out and lets the BT stack run.
+  // BLE: received bytes arrive via the GATT write callbacks (data_rx/cmd_rx); the
+  // loop tees the target console out (queued into the TX rings) and drains those
+  // rings to the radio, retrying when the controller's buffers free up.
   for (;;) {
     skrit_dev_poll(&dev);
+    ble_tx_drain();
     k_msleep(1);
   }
 #else
