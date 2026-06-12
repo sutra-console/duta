@@ -25,40 +25,51 @@
 #include "nvs_flash.h"
 #include "soc/rtc_cntl_reg.h"
 
-#include "board.h"            // duta_outputs[] + role pins + BOARD_NAME + DUTA_RGB_*
-#include "duta_ws2812_rmt.h"  // onboard addressable LED
-#include "skrit_device.h"     // the portable core
-#include "duta_i2c.h"         // I2C master DATA backend (new i2c_master driver)
-#include "duta_wifi_idf.h"    // WiFi + WebSocket bridge + captive portal (lwip)
+#include "board.h" // duta_outputs[] + role pins + BOARD_NAME + DUTA_RGB_* + mcu pins
+
+// Runtime IO provisioning: the duta_io[] table can be re-provisioned from the app
+// and persisted in NVS. These store hooks must be defined before duta_io_arduino.h
+// (the engine's loader calls them under DUTA_HAVE_STORE).
+#define DUTA_PROVISION
+#define DUTA_HAVE_STORE
+#include "nvs.h"
+static uint16_t duta_io_store_load(uint8_t *buf, uint16_t cap) {
+  nvs_handle_t h;
+  if (nvs_open("duta", NVS_READONLY, &h) != ESP_OK) return 0;
+  size_t n = cap;
+  esp_err_t e = nvs_get_blob(h, "io", buf, &n);
+  nvs_close(h);
+  return e == ESP_OK ? (uint16_t)n : 0;
+}
+static uint8_t duta_io_store_save(const uint8_t *buf, uint16_t n) {
+  nvs_handle_t h;
+  if (nvs_open("duta", NVS_READWRITE, &h) != ESP_OK) return 0;
+  esp_err_t e = nvs_set_blob(h, "io", buf, n);
+  nvs_commit(h);
+  nvs_close(h);
+  return e == ESP_OK;
+}
+static void duta_io_store_clear(void) {
+  nvs_handle_t h;
+  if (nvs_open("duta", NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_erase_key(h, "io");
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+#include "duta_io_arduino.h" // table-driven IO HAL (GPIO/LEDC/RMT) + provisioning resolver
+#include "skrit_device.h"    // the portable core
+#include "duta_i2c.h"        // I2C master DATA backend (new i2c_master driver)
+#include "duta_wifi_idf.h"   // WiFi + WebSocket bridge + captive portal (lwip)
 
 #define FW_LO 0x04
 #define FW_HI 0x00
-#define DUTA_N_OUT ((uint8_t)(sizeof duta_outputs / sizeof duta_outputs[0]))
 #define DATA_UART UART_NUM_1
 
-// map a bare RGB-order token (RGB / GRB) to a flag for the WS2812 driver
-#define DUTA_ORDER_RGB 1
-#define DUTA_ORDER_GRB 0
-#define DUTA_CAT2(a, b) a##b
-#define DUTA_CAT(a, b) DUTA_CAT2(a, b)
-#ifdef DUTA_RGB_ORDER
-#define DUTA_RGB_IS_RGB DUTA_CAT(DUTA_ORDER_, DUTA_RGB_ORDER)
-#else
-#define DUTA_RGB_IS_RGB 0
-#endif
-
 static skrit_dev g_dev;
-static uint8_t g_out[DUTA_N_OUT > 0 ? DUTA_N_OUT : 1];
-static uint16_t g_duty[DUTA_N_OUT > 0 ? DUTA_N_OUT : 1];
-static int8_t g_pwm_ch[DUTA_N_OUT > 0 ? DUTA_N_OUT : 1]; // LEDC channel per PWM output, else -1
 static uint32_t g_baud = 115200;
 static uint8_t g_data_kind = SKRIT_DATA_UART; // UART console (default) or I2C master
 static skrit_hal HAL;                         // filled in app_main; referenced by data_kind_apply
-
-static inline bool is_io(uint8_t i) { return duta_outputs[i].type == SKRIT_CTRL_IO; }
-static inline bool is_pwm(uint8_t i) { return duta_outputs[i].type == SKRIT_CTRL_PWM; }
-static inline bool is_rgb(uint8_t i) { return duta_outputs[i].type == SKRIT_CTRL_RGB; }
-static inline bool active_low(uint8_t i) { return duta_outputs[i].flags & DUTA_ACTIVE_LOW; }
 
 // ---- DATA target UART -------------------------------------------------------
 static void data_uart_begin(void) {
@@ -75,46 +86,6 @@ static void data_uart_begin(void) {
   uart_set_pin(DATA_UART, DATA_TX_PIN, DATA_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 }
 
-// ---- output setup -----------------------------------------------------------
-static void outputs_init(void) {
-  uint8_t ledc_ch = 0;
-  bool ledc_timer_done = false;
-  for (uint8_t i = 0; i < DUTA_N_OUT; i++) {
-    g_pwm_ch[i] = -1;
-    if (is_io(i)) {
-      gpio_reset_pin((gpio_num_t)duta_outputs[i].pin);
-      gpio_set_direction((gpio_num_t)duta_outputs[i].pin, GPIO_MODE_OUTPUT);
-      gpio_set_level((gpio_num_t)duta_outputs[i].pin, active_low(i) ? 1 : 0);
-    } else if (is_pwm(i)) {
-      if (!ledc_timer_done) {
-        ledc_timer_config_t t = {
-            .speed_mode = LEDC_LOW_SPEED_MODE,
-            .duty_resolution = LEDC_TIMER_10_BIT, // 0..1023, matches the skrit duty range
-            .timer_num = LEDC_TIMER_0,
-            .freq_hz = 5000,
-            .clk_cfg = LEDC_AUTO_CLK,
-        };
-        ledc_timer_config(&t);
-        ledc_timer_done = true;
-      }
-      ledc_channel_config_t ch = {
-          .gpio_num = duta_outputs[i].pin,
-          .speed_mode = LEDC_LOW_SPEED_MODE,
-          .channel = (ledc_channel_t)ledc_ch,
-          .timer_sel = LEDC_TIMER_0,
-          .duty = 0,
-          .hpoint = 0,
-          .flags.output_invert = active_low(i) ? 1 : 0,
-      };
-      ledc_channel_config(&ch);
-      g_pwm_ch[i] = (int8_t)ledc_ch++;
-    }
-  }
-#ifdef DUTA_RGB_PIN
-  ws2812_init(DUTA_RGB_PIN, DUTA_RGB_COUNT, DUTA_RGB_IS_RGB);
-#endif
-}
-
 // ---- HAL: transport ---------------------------------------------------------
 static void hal_link_write(void *c, const uint8_t *p, uint16_t n) {
   (void)c;
@@ -128,76 +99,6 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
   (void)c;
   int n = uart_read_bytes(DATA_UART, out, cap, 0);
   return n > 0 ? (uint16_t)n : 0;
-}
-
-// ---- HAL: outputs -----------------------------------------------------------
-static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
-  (void)c;
-  if (idx >= DUTA_N_OUT) return;
-  g_out[idx] = on ? 1 : 0;
-  if (is_io(idx)) {
-    gpio_set_level((gpio_num_t)duta_outputs[idx].pin, (on ? 1 : 0) ^ (active_low(idx) ? 1 : 0));
-  } else if (is_pwm(idx)) {
-    g_duty[idx] = on ? 1023 : 0;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)g_pwm_ch[idx], g_duty[idx]);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)g_pwm_ch[idx]);
-  } else if (is_rgb(idx)) {
-    uint8_t v = on ? 64 : 0;
-    for (uint16_t px = 0; px < duta_outputs[idx].arg; px++) ws2812_set(px, v, v, v);
-    ws2812_show();
-  }
-}
-static uint8_t hal_out_get(void *c, uint8_t idx) {
-  (void)c;
-  return idx < DUTA_N_OUT ? g_out[idx] : 0;
-}
-static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
-  (void)c;
-  if (idx >= DUTA_N_OUT) return;
-  *type = duta_outputs[idx].type;
-  *name = duta_outputs[idx].name;
-}
-
-// ---- HAL: PWM ---------------------------------------------------------------
-static uint8_t hal_pwm_set(void *c, uint8_t idx, uint16_t duty) {
-  (void)c;
-  if (idx >= DUTA_N_OUT || !is_pwm(idx)) return 0;
-  if (duty > 1023) duty = 1023;
-  g_duty[idx] = duty;
-  g_out[idx] = duty ? 1 : 0;
-  ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)g_pwm_ch[idx], duty);
-  ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)g_pwm_ch[idx]);
-  return 1;
-}
-static uint16_t hal_pwm_get(void *c, uint8_t idx) {
-  (void)c;
-  return idx < DUTA_N_OUT ? g_duty[idx] : 0;
-}
-
-// ---- HAL: RGB ---------------------------------------------------------------
-static uint8_t hal_rgb_count(void *c, uint8_t idx) {
-  (void)c;
-  return (idx < DUTA_N_OUT && is_rgb(idx)) ? (uint8_t)duta_outputs[idx].arg : 0;
-}
-static uint8_t hal_rgb_set(void *c, uint8_t idx, uint8_t px, uint8_t r, uint8_t g, uint8_t b) {
-  (void)c;
-  if (idx >= DUTA_N_OUT || !is_rgb(idx)) return 0;
-  uint16_t n = duta_outputs[idx].arg;
-  if (px == SKRIT_RGB_ALL) {
-    for (uint16_t i = 0; i < n; i++) ws2812_set(i, r, g, b);
-  } else if (px < n) {
-    ws2812_set(px, r, g, b);
-  } else {
-    return 0;
-  }
-  ws2812_show();
-  g_out[idx] = (r | g | b) ? 1 : 0;
-  return 1;
-}
-static void hal_rgb_get(void *c, uint8_t idx, uint8_t px, uint8_t *r, uint8_t *g, uint8_t *b) {
-  (void)c;
-  if (idx >= DUTA_N_OUT || !is_rgb(idx) || px >= duta_outputs[idx].arg) { *r = *g = *b = 0; return; }
-  ws2812_get(px, r, g, b);
 }
 
 // ---- HAL: serial params + signals ------------------------------------------
@@ -244,8 +145,8 @@ static void hal_pump(void *c) { (void)c; }
 
 static uint8_t board_caps(void) {
   uint8_t caps = SKRIT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT;
-  for (uint8_t i = 0; i < DUTA_N_OUT; i++)
-    if (is_pwm(i)) caps |= SKRIT_CAP_PWM;
+  for (uint8_t i = 0; i < duta_tbl_n; i++) // the active (maybe provisioned) table
+    if (duta_tbl[i].type == SKRIT_CTRL_PWM) caps |= SKRIT_CAP_PWM;
   return caps;
 }
 
@@ -326,7 +227,7 @@ static uint8_t hal_i2c_xfer(void *c, uint8_t addr, const uint8_t *w, uint8_t wle
 
 void app_main(void) {
   nvs_flash_init();
-  outputs_init();
+  duta_io_begin(); // load any provisioned table + configure GPIO/LEDC/RGB from it
   data_uart_begin();
 #if DTR_PIN >= 0
   gpio_set_direction((gpio_num_t)DTR_PIN, GPIO_MODE_OUTPUT);
@@ -342,18 +243,23 @@ void app_main(void) {
   HAL.fw_ver = (FW_HI << 8) | FW_LO;
   HAL.caps = board_caps();
   HAL.macro_tier = SKRIT_TIER_INTERACTIVE;
-  HAL.n_outputs = DUTA_N_OUT;
+  HAL.n_outputs = duta_tbl_n; // the active (maybe provisioned) table
   HAL.link_write = hal_link_write;
   HAL.data_write = hal_data_write;
   HAL.data_read = hal_data_read;
-  HAL.out_set = hal_out_set;
-  HAL.out_get = hal_out_get;
-  HAL.out_desc = hal_out_desc;
-  HAL.pwm_set = hal_pwm_set;
-  HAL.pwm_get = hal_pwm_get;
-  HAL.rgb_count = hal_rgb_count;
-  HAL.rgb_set = hal_rgb_set;
-  HAL.rgb_get = hal_rgb_get;
+  HAL.out_set = duta_io_out_set; // the table-driven engine (GPIO/LEDC/RMT)
+  HAL.out_get = duta_io_out_get;
+  HAL.out_desc = duta_io_out_desc;
+  HAL.pwm_set = duta_io_pwm_set;
+  HAL.pwm_get = duta_io_pwm_get;
+  HAL.pwm_config_get = duta_io_pwm_config_get;
+  HAL.pwm_config_set = duta_io_pwm_config_set;
+  HAL.rgb_count = duta_io_rgb_count;
+  HAL.rgb_set = duta_io_rgb_set;
+  HAL.rgb_get = duta_io_rgb_get;
+  HAL.pin_caps = duta_io_pin_caps; // runtime provisioning (advertises FLAG_PROVISION)
+  HAL.config_get = duta_io_config_get;
+  HAL.config_set = duta_io_config_set;
   HAL.proto_get = hal_proto_get;
   HAL.proto_set = hal_proto_set;
   HAL.serial_signal = hal_serial_signal;

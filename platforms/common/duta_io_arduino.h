@@ -20,7 +20,18 @@
 #ifndef DUTA_IO_ARDUINO_H
 #define DUTA_IO_ARDUINO_H
 
+// Despite the name, this drives both the Arduino platforms (espressif, pico) and
+// the pure ESP-IDF build (-DDUTA_PURE_IDF): the table/resolver/persistence logic
+// is framework-agnostic, and only the leaf hardware ops branch (the "platform
+// leaf ops" section below). Zephyr drives IO from its devicetree instead.
+#ifdef DUTA_PURE_IDF
+#include <stdbool.h>
+#include <stdint.h>
+#include "driver/gpio.h"
+#include "driver/ledc.h"
+#else
 #include <Arduino.h>
+#endif
 
 #include "duta_io.h"
 #include "protocol.h"
@@ -60,8 +71,6 @@ static const duta_io *duta_tbl = duta_outputs;
 static uint8_t duta_tbl_n = DUTA_N_OUTPUTS;
 
 #if defined(DUTA_RGB_PIN) && DUTA_RGB_PIN >= 0
-#define FASTLED_INTERNAL // silence the version banner
-#include <FastLED.h>
 #ifndef DUTA_RGB_COUNT
 #define DUTA_RGB_COUNT 1
 #endif
@@ -70,34 +79,119 @@ static uint8_t duta_tbl_n = DUTA_N_OUTPUTS;
 #ifndef DUTA_RGB_ORDER
 #define DUTA_RGB_ORDER GRB
 #endif
-static CRGB duta_leds[DUTA_RGB_COUNT];
 #define DUTA_HAS_RGB 1
+#ifdef DUTA_PURE_IDF
+#include "duta_ws2812_rmt.h" // the ws2812 RMT buffer IS the pixel storage
+#else
+#define FASTLED_INTERNAL // silence the version banner
+#include <FastLED.h>
+static CRGB duta_leds[DUTA_RGB_COUNT];
+#endif
 #else
 #define DUTA_HAS_RGB 0
 #endif
+
+// ---- platform leaf ops (Arduino vs pure-IDF; the only framework-coupled code) -
+#ifdef DUTA_PURE_IDF
+static inline void duta__io_out_mode(int16_t pin) {
+  gpio_reset_pin((gpio_num_t)pin);
+  gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+}
+static inline void duta__io_write(int16_t pin, uint8_t lvl) { gpio_set_level((gpio_num_t)pin, lvl); }
+static inline void duta__io_in_mode(int16_t pin) {
+  gpio_reset_pin((gpio_num_t)pin);
+  gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
+}
+static inline uint8_t duta__io_read(int16_t pin) { return gpio_get_level((gpio_num_t)pin) ? 1 : 0; }
+static inline uint16_t duta__adc_read(int16_t pin) { (void)pin; return 0; } // analog-in TODO
+// LEDC PWM: a pin->channel map, populated by duta_io_begin() (provisioning may add rows).
+static struct { int16_t pin; uint8_t ch; } duta__ledc[8];
+static uint8_t duta__ledc_n;
+static int duta__ledc_ch(int16_t pin) {
+  for (uint8_t i = 0; i < duta__ledc_n; i++) if (duta__ledc[i].pin == pin) return duta__ledc[i].ch;
+  return -1;
+}
+static void duta__pwm_timer(uint32_t freq, uint8_t res) {
+  ledc_timer_config_t t = {.speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = (ledc_timer_bit_t)res,
+                           .timer_num = LEDC_TIMER_0, .freq_hz = freq, .clk_cfg = LEDC_AUTO_CLK};
+  ledc_timer_config(&t);
+}
+static void duta__pwm_setup(int16_t pin) {
+  if (duta__ledc_ch(pin) >= 0 || duta__ledc_n >= 8) return;
+  ledc_channel_config_t ch = {.gpio_num = pin, .speed_mode = LEDC_LOW_SPEED_MODE,
+                              .channel = (ledc_channel_t)duta__ledc_n, .timer_sel = LEDC_TIMER_0,
+                              .duty = 0, .hpoint = 0};
+  ledc_channel_config(&ch);
+  duta__ledc[duta__ledc_n].pin = pin;
+  duta__ledc[duta__ledc_n].ch = duta__ledc_n;
+  duta__ledc_n++;
+}
+static void duta__pwm_out(int16_t pin, uint32_t v) {
+  int c = duta__ledc_ch(pin);
+  if (c < 0) return;
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)c, v);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)c);
+}
+#if DUTA_HAS_RGB
+#define DUTA_ORDER_RGB 1
+#define DUTA_ORDER_GRB 0
+#define DUTA__CAT2(a, b) a##b
+#define DUTA__CAT(a, b) DUTA__CAT2(a, b)
+#define DUTA__RGB_IS_RGB DUTA__CAT(DUTA_ORDER_, DUTA_RGB_ORDER)
+static inline void duta__rgb_begin(void) { ws2812_init(DUTA_RGB_PIN, DUTA_RGB_COUNT, DUTA__RGB_IS_RGB); }
+static inline void duta__rgb_set_px(uint8_t px, uint8_t r, uint8_t g, uint8_t b) { ws2812_set(px, r, g, b); }
+static inline void duta__rgb_get_px(uint8_t px, uint8_t *r, uint8_t *g, uint8_t *b) { ws2812_get(px, r, g, b); }
+static inline void duta__rgb_show(void) { ws2812_show(); }
+#endif
+
+#else // Arduino
+static inline void duta__io_out_mode(int16_t pin) { pinMode(pin, OUTPUT); }
+static inline void duta__io_write(int16_t pin, uint8_t lvl) { digitalWrite(pin, lvl ? HIGH : LOW); }
+static inline void duta__io_in_mode(int16_t pin) { pinMode(pin, INPUT); }
+static inline uint8_t duta__io_read(int16_t pin) { return digitalRead(pin) ? 1 : 0; }
+static inline uint16_t duta__adc_read(int16_t pin) { return (uint16_t)analogRead(pin); }
+static inline void duta__pwm_setup(int16_t pin) { (void)pin; } // analogWrite auto-attaches
+static inline void duta__pwm_out(int16_t pin, uint32_t v) { analogWrite(pin, (int)v); }
+#if DUTA_HAS_RGB
+static inline void duta__rgb_begin(void) {
+  FastLED.addLeds<WS2812, DUTA_RGB_PIN, DUTA_RGB_ORDER>(duta_leds, DUTA_RGB_COUNT);
+  FastLED.setBrightness(255);
+  FastLED.clear(true);
+}
+static inline void duta__rgb_set_px(uint8_t px, uint8_t r, uint8_t g, uint8_t b) { duta_leds[px] = CRGB(r, g, b); }
+static inline void duta__rgb_get_px(uint8_t px, uint8_t *r, uint8_t *g, uint8_t *b) {
+  *r = duta_leds[px].r;
+  *g = duta_leds[px].g;
+  *b = duta_leds[px].b;
+}
+static inline void duta__rgb_show(void) { FastLED.show(); }
+#endif
+#endif // DUTA_PURE_IDF
 
 // per-output state owned by the driver
 static uint8_t duta_on[DUTA_MAX_OUTPUTS];    // digital on/off latch
 static uint16_t duta_duty[DUTA_MAX_OUTPUTS]; // pwm duty 0..DUTA_PWM_MAX
 
-// ---- helpers ---------------------------------------------------------------
+// ---- helpers (call the platform leaf ops above) ----------------------------
 static inline void duta__write_digital(const duta_io *io, uint8_t on) {
   uint8_t lvl = (io->flags & DUTA_ACTIVE_LOW) ? !on : on;
-  digitalWrite(io->pin, lvl ? HIGH : LOW);
+  duta__io_write(io->pin, lvl ? 1 : 0);
 }
 
 static inline void duta__write_pwm(const duta_io *io, uint16_t duty) {
   uint32_t hwmax = (1u << duta_pwm_res) - 1; // rescale wire duty -> hardware range
   uint32_t v = (uint32_t)duty * hwmax / DUTA_PWM_MAX;
   if (io->flags & DUTA_ACTIVE_LOW) v = hwmax - v;
-  analogWrite(io->pin, (int)v);
+  duta__pwm_out(io->pin, v);
 }
 
-// Apply the current PWM frequency + resolution to the analog peripheral.
-// arduino-esp32 3.x made these PER-PIN (and they need the LEDC channel already
-// attached, i.e. call after the first analogWrite); 2.x and RP2040 are global.
+// Apply the current PWM frequency + resolution. On IDF it's the LEDC timer; on
+// arduino-esp32 3.x analogWriteFreq/Res are PER-PIN (after the channel attaches);
+// 2.x and RP2040 are global.
 static inline void duta__pwm_apply(void) {
-#if defined(ARDUINO_ARCH_RP2040)
+#if defined(DUTA_PURE_IDF)
+  duta__pwm_timer(duta_pwm_freq, duta_pwm_res);
+#elif defined(ARDUINO_ARCH_RP2040)
   analogWriteFreq(duta_pwm_freq);
   analogWriteResolution(duta_pwm_res);
 #elif defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -115,7 +209,11 @@ static inline void duta__pwm_apply(void) {
 #if DUTA_HAS_RGB
 static inline uint8_t duta__rgb_lit(void) {
   uint8_t lit = 0;
-  for (int i = 0; i < DUTA_RGB_COUNT; i++) lit |= duta_leds[i].r | duta_leds[i].g | duta_leds[i].b;
+  for (int i = 0; i < DUTA_RGB_COUNT; i++) {
+    uint8_t r, g, b;
+    duta__rgb_get_px((uint8_t)i, &r, &g, &b);
+    lit |= r | g | b;
+  }
   return lit ? 1 : 0;
 }
 #endif
@@ -133,8 +231,8 @@ static inline void duta_io_out_set(void *ctx, uint8_t idx, uint8_t on) {
     break;
   case SKRIT_CTRL_RGB:
 #if DUTA_HAS_RGB
-    for (int i = 0; i < DUTA_RGB_COUNT; i++) duta_leds[i] = on ? CRGB(64, 64, 64) : CRGB::Black;
-    FastLED.show();
+    for (int i = 0; i < DUTA_RGB_COUNT; i++) duta__rgb_set_px((uint8_t)i, on ? 64 : 0, on ? 64 : 0, on ? 64 : 0);
+    duta__rgb_show();
 #endif
     break;
   default: // plain digital on/off (relay, LED, reset line; see the name)
@@ -214,13 +312,13 @@ static inline uint8_t duta_io_rgb_set(void *ctx, uint8_t idx, uint8_t px, uint8_
 #if DUTA_HAS_RGB
   if (idx >= duta_tbl_n || duta_tbl[idx].type != SKRIT_CTRL_RGB) return 0;
   if (px == SKRIT_RGB_ALL) {
-    for (int i = 0; i < DUTA_RGB_COUNT; i++) duta_leds[i] = CRGB(r, g, b);
+    for (int i = 0; i < DUTA_RGB_COUNT; i++) duta__rgb_set_px((uint8_t)i, r, g, b);
   } else if (px < DUTA_RGB_COUNT) {
-    duta_leds[px] = CRGB(r, g, b);
+    duta__rgb_set_px(px, r, g, b);
   } else {
     return 0;
   }
-  FastLED.show();
+  duta__rgb_show();
   return 1;
 #else
   (void)idx; (void)px; (void)r; (void)g; (void)b;
@@ -232,7 +330,7 @@ static inline void duta_io_rgb_get(void *ctx, uint8_t idx, uint8_t px, uint8_t *
   (void)ctx; (void)idx;
 #if DUTA_HAS_RGB
   if (px >= DUTA_RGB_COUNT) px = 0;
-  *r = duta_leds[px].r; *g = duta_leds[px].g; *b = duta_leds[px].b;
+  duta__rgb_get_px(px, r, g, b);
 #else
   (void)px; *r = *g = *b = 0;
 #endif
@@ -249,7 +347,7 @@ static inline uint16_t duta_io_in_get(void *ctx, uint8_t idx) {
   (void)ctx;
   if (idx >= DUTA_N_INPUTS) return 0;
   const duta_io *io = &duta_inputs[idx];
-  return io->type == SKRIT_IN_ANALOG ? (uint16_t)analogRead(io->pin) : (digitalRead(io->pin) ? 1 : 0);
+  return io->type == SKRIT_IN_ANALOG ? duta__adc_read(io->pin) : duta__io_read(io->pin);
 }
 #endif
 
@@ -461,21 +559,28 @@ static inline void duta_io_begin(void) {
 #ifdef DUTA_PROVISION
   duta_io_load(); // swap in a provisioned table if one is persisted
 #endif
+#ifdef DUTA_PURE_IDF
+  // LEDC needs its shared timer configured before any channel attaches.
+  duta__ledc_n = 0;
+  for (uint8_t i = 0; i < duta_tbl_n; i++)
+    if (duta_tbl[i].type == SKRIT_CTRL_PWM) { duta__pwm_timer(duta_pwm_freq, duta_pwm_res); break; }
+#endif
   for (uint8_t i = 0; i < duta_tbl_n; i++) {
     const duta_io *io = &duta_tbl[i];
-    if (io->type == SKRIT_CTRL_RGB) continue; // driven by FastLED, not a GPIO
-    pinMode(io->pin, OUTPUT);
-    duta_io_out_set(NULL, i, 0); // PWM rows: first analogWrite attaches the channel
+    if (io->type == SKRIT_CTRL_RGB) continue; // driven by the RGB peripheral, not a GPIO
+    duta__io_out_mode(io->pin);
+    if (io->type == SKRIT_CTRL_PWM) duta__pwm_setup(io->pin); // IDF: attach a LEDC channel
+    duta_io_out_set(NULL, i, 0); // arduino PWM rows: first analogWrite attaches the channel
   }
+#ifndef DUTA_PURE_IDF
   duta__pwm_apply(); // default PWM frequency + resolution (per-pin on esp32 core 3.x)
+#endif
 #if DUTA_HAS_RGB
-  FastLED.addLeds<WS2812, DUTA_RGB_PIN, DUTA_RGB_ORDER>(duta_leds, DUTA_RGB_COUNT);
-  FastLED.setBrightness(255);
-  FastLED.clear(true);
+  duta__rgb_begin();
 #endif
 #ifdef DUTA_HAVE_INPUTS
   for (uint8_t i = 0; i < DUTA_N_INPUTS; i++)
-    if (duta_inputs[i].type == SKRIT_IN_DIGITAL) pinMode(duta_inputs[i].pin, INPUT);
+    if (duta_inputs[i].type == SKRIT_IN_DIGITAL) duta__io_in_mode(duta_inputs[i].pin);
 #endif
 }
 
