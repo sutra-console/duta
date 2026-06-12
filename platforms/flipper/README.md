@@ -63,24 +63,38 @@ the network key + model from the SD card. It builds on Bridge mode (the nRF52
 hangs off the header UART) and adds a Zigbee brain. **Not built yet**; two
 architecture paths, decision pending:
 
-1. **Dumb radio + Flipper brain** (matches the project thesis — see the Sutra
-   network model). The nRF52 stays a raw 802.15.4 transceiver (`duta_154_sniff_tx`:
-   it just TX/RXes MAC bytes, knows nothing of Zigbee); the **Flipper** runs the
-   Zigbee NWK/APS layer — AES-128-CCM* crypto, frame-counter management, route
-   relay, join handling — reading key/PAN/channel from
+Both are valid — Duta is a framework, not a fixed-function device (see the
+"design philosophy" note below). The only question is *where the Zigbee
+intelligence lives*, which is a per-module engineering call, not a doctrine:
+
+1. **Dumb radio + Flipper brain.** The nRF52 stays a raw 802.15.4 transceiver
+   (`duta_154_sniff_tx`: it just TX/RXes MAC bytes, knows nothing of Zigbee); the
+   **Flipper** runs the Zigbee NWK/APS layer — AES-128-CCM* crypto, frame-counter
+   management, route relay, join handling — reading key/PAN/channel from
    `apps_data/duta/networks.json` (a copy of Sutra's `.sutra/networks.json`).
-   *Pro:* one firmware serves Zigbee/Thread/Matter, evolves with no reflash.
-   *Con:* we implement Zigbee routing on the Flipper. **Gated on network-model
-   phase B** (the AES-CCM* frame builder — not started).
+   *Trade:* one firmware serves Zigbee/Thread/Matter and evolves with no reflash,
+   but we implement Zigbee routing on the Flipper. **Gated on network-model phase
+   B** (the AES-CCM* frame builder — not started).
 
 2. **Smart radio (ZBOSS) on the nRF52.** The nRF52 runs a conformant Zigbee
    router stack (nRF Connect SDK / ZBOSS); the Flipper just pushes the network
-   key + role via skrit `CFG` from the SD card, then bridges. *Pro:* a real
-   router nearly for free. *Con:* breaks the dumb-radio model; pulls in the nRF
-   Connect SDK toolchain.
+   key + role via skrit `CFG` from the SD card, then bridges. *Trade:* a real
+   router nearly for free, but the routing logic is baked into firmware (reflash
+   to evolve) and it pulls in the nRF Connect SDK toolchain.
 
 Either way: the Flipper supplies the keys (from SD) + the UI; the nRF52 supplies
 the radio. The host-side crypto plan lives in the Sutra network model.
+
+### Design philosophy
+
+Stock Duta firmware "just does the simple thing" the way QMK "just sends
+keycodes" — that's the *reference posture*, not the ceiling. Duta is a framework
+for putting **user-defined functionality** on a dev device: a module registers a
+handler, advertises it, and Sutra/MCP faithfully forward the high-level intent
+(`zigbee_join(...)`, `send_touch(x, y)`, anything) to that handler without having
+to understand or bless the implementation. So a ZBOSS router, or a module that
+spoofs touch events through foil taped to a screen, is squarely *in* scope —
+Sutra accepts that the user knows what their on-board code does with the event.
 
 ## Macros (on-device runner)
 
