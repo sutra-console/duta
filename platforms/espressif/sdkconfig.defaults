@@ -1,0 +1,10 @@
+# ESP-IDF sdkconfig defaults for the HYBRID (arduino, espidf) envs (e.g. s3zero_idf).
+# Pure-arduino envs ignore this file. These satisfy arduino-esp32-as-a-component's
+# requirements so the Arduino layer runs on the IDF base; as modules are peeled to
+# pure IDF, IDF-component options (NimBLE, led_strip, …) get added here.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_AUTOSTART_ARDUINO=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# 4MB flash (the S3-Zero is S3FH4R2) — the IDF default is 2MB.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
