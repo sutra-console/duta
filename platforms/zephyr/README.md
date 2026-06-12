@@ -34,6 +34,44 @@ bootloader* (skrit `REBOOT`, GPREGRET `0x57`) drops it back into the UF2 drive.
 BLE works the same as on the DK — add `-DEXTRA_CONF_FILE=overlay-ble.conf`; the
 nice!nano's whole appeal is the untethered BLE link to Sutra.
 
+### Reboot to bootloader (flash with no button)
+
+The firmware honors skrit `REBOOT` with `mode = 1` (**bootloader/DFU**) by writing
+`0x57` — the Adafruit/UF2 bootloader's "enter DFU" magic — to the nRF52
+`GPREGRET` retained register, then doing a warm reset. The bootloader sees the
+magic on boot and stays in DFU, mounting its `NICENANO`/`xxxBOOT` USB drive. So
+**after the first UF2 flash you never press the button again** — the host drops
+the board into the bootloader on demand.
+
+- **Where**: `hal_reboot()` in `src/main.c`, gated on `CONFIG_SOC_SERIES_NRF52`
+  (+ `CONFIG_REBOOT` for the reset). `mode = 0` is a plain app reset. Advertised
+  via `SKRIT_CAP_REBOOT` in `INFO`.
+- **From Sutra / MCP**: *Reboot → bootloader* (MCP `reboot_device bootloader=true`).
+- **Headless flash flow** (what the bench scripts do):
+  1. send `REBOOT mode=1` on the CMD channel → the `NICENANO` drive mounts,
+  2. copy `build/zephyr/zephyr.uf2` onto it,
+  3. the bootloader flashes + resets; the board re-enumerates running the new build.
+
+  No physical access required — the whole build→flash→run loop is scriptable over
+  the USB serial. (The DK/dongle answer `REBOOT` too; the DK's J-Link makes
+  `west flash` the usual path there.)
+
+### Demo INVOKE commands
+
+The nRF build ships three example **INVOKE** commands (user-defined device
+commands — see [`PROTOCOL.md`](../../protocol/PROTOCOL.md) → *INVOKE*) so the
+framework's extension point can be exercised on hardware:
+
+| id | command | effect |
+|----|---------|--------|
+| `0x0001` | `set_position(x:u16, y:u16)` | blips the status LED as an ack |
+| `0x8001` | `blink(times:u8)` | blinks the status LED `times` (visible proof) |
+| `0x8002` | `echo(bytes) -> reply` | echoes the payload back (the reply path) |
+
+List them with `INVOKE_DESC`; call them with `INVOKE` (or Sutra's
+`list_invocables` / `invoke`). `blink` runs synchronously (`k_msleep`), so its
+reply lands after the blinks finish — a real handler would be non-blocking.
+
 ### BLE advertising sniffer variant
 
 The nRF52840 is also a capable BLE sniffer. Build with `overlay-sniff.conf` and
@@ -95,7 +133,9 @@ Optional `duta-dtr` / `duta-rts` GPIO aliases drive a target's reset/boot pins f
 
 `PING` · `INFO` (caps = mux + serial + reboot, `macro_tier = 2`) · `DEVICE_NAME` ·
 `OUTPUT_SET/GET/TOGGLE/DESC/PULSE` · `SERIAL_GET/SET/SIGNAL` · `REBOOT` (app, or
-GPREGRET→DFU on nRF52) · scratch (`0xFF`) macro push-and-run via the shared skrit-mc VM.
+GPREGRET→DFU on nRF52, see *Reboot to bootloader*) · `INVOKE_DESC`/`INVOKE` (the
+demo user-defined commands above) · scratch (`0xFF`) macro push-and-run via the
+shared skrit-mc VM (incl. the `INVOKE` opcode).
 
 ## Roadmap
 
