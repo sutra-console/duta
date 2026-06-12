@@ -494,6 +494,67 @@ static void hal_pump(void *c) {
   k_yield();
 }
 
+// ---- demo INVOKE commands (user-defined; proves the framework extension point
+// on real hardware). The device owns these; Sutra forwards intents blind.
+//   0x0001 send_touch(x:u16,y:u16)  well-known — blips the status LED as an ack
+//   0x8001 blink(times:u8)          vendor — blink the status LED `times` (visible)
+//   0x8002 echo(bytes)->reply       vendor — echo the payload back (reply path)
+static void led_pulse(uint16_t on_ms, uint16_t off_ms) {
+  if (!device_is_ready(out_gpio[0].port)) return;
+  gpio_pin_set_dt(&out_gpio[0], 1);
+  k_msleep(on_ms);
+  gpio_pin_set_dt(&out_gpio[0], 0);
+  if (off_ms) k_msleep(off_ms);
+}
+static uint8_t hal_cmd_desc(void *c, uint8_t index, uint16_t *id, uint8_t *nargs,
+                            uint8_t *argtype, uint8_t *flags, const char **name) {
+  ARG_UNUSED(c);
+  switch (index) {
+  case 0:
+    *id = SKRIT_INVOKE_TOUCH; *nargs = 2;
+    argtype[0] = SKRIT_ARG_U16; argtype[1] = SKRIT_ARG_U16;
+    *flags = 0; *name = "send_touch";
+    break;
+  case 1:
+    *id = SKRIT_INVOKE_VENDOR_BASE + 1; *nargs = 1;
+    argtype[0] = SKRIT_ARG_U8; *flags = 0; *name = "blink";
+    break;
+  case 2:
+    *id = SKRIT_INVOKE_VENDOR_BASE + 2; *nargs = 1;
+    argtype[0] = SKRIT_ARG_BYTES; *flags = SKRIT_INVOKE_REPLY; *name = "echo";
+    break;
+  default:
+    break;
+  }
+  return 3;
+}
+static uint8_t hal_cmd_invoke(void *c, uint16_t id, const uint8_t *p, uint8_t plen,
+                              uint8_t *reply, uint8_t cap, uint8_t *rlen) {
+  ARG_UNUSED(c);
+  *rlen = 0;
+  if (id == SKRIT_INVOKE_TOUCH) {
+    if (plen < 4) return SKRIT_ST_BADARGS; // x(u16), y(u16)
+    led_pulse(60, 0);
+    return SKRIT_ST_OK;
+  }
+  if (id == SKRIT_INVOKE_VENDOR_BASE + 1) { // blink(times)
+    uint8_t times = plen ? p[0] : 1;
+    if (times > 10) times = 10;
+    for (uint8_t i = 0; i < times; i++) led_pulse(120, 120);
+    return SKRIT_ST_OK;
+  }
+  if (id == SKRIT_INVOKE_VENDOR_BASE + 2) { // echo(len(1), bytes) -> reply bytes
+    if (plen < 1) return SKRIT_ST_BADARGS;
+    uint8_t n = p[0];
+    if ((uint16_t)n + 1 > plen) return SKRIT_ST_BADARGS;
+    if (n > cap) n = cap;
+    for (uint8_t i = 0; i < n; i++) reply[i] = p[1 + i];
+    *rlen = n;
+    return SKRIT_ST_OK;
+  }
+  return SKRIT_ST_NOTFOUND;
+}
+
 static const skrit_hal HAL = {
     .name = "Duta nRF52840",
     .fw_ver = (FW_HI << 8) | FW_LO,
@@ -525,6 +586,8 @@ static const skrit_hal HAL = {
     .reboot = hal_reboot,
     .millis = hal_millis,
     .pump = hal_pump,
+    .cmd_desc = hal_cmd_desc,   // advertises SKRIT_FLAG_INVOKE + the demo commands
+    .cmd_invoke = hal_cmd_invoke,
 };
 
 int main(void) {
