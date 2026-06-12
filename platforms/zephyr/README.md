@@ -56,6 +56,11 @@ the board into the bootloader on demand.
   the USB serial. (The DK/dongle answer `REBOOT` too; the DK's J-Link makes
   `west flash` the usual path there.)
 
+A **custom Duta UF2 bootloader** ([`bootloader/`](bootloader/)) extends this
+further: it IDs the board as a Duta (volume label `DUTA`, VID `0x1209`) and adds
+the reverse trigger — a **1200-baud touch on its CDC exits DFU back to the app**,
+so the bootloader↔app round trip is fully host-driven, no button.
+
 ### Demo INVOKE commands
 
 The nRF build ships three example **INVOKE** commands (user-defined device

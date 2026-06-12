@@ -1,0 +1,3 @@
+# pinned upstream checkout + build artifacts (rebuilt by build.sh)
+/.upstream/
+/dist/
