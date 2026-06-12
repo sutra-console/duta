@@ -91,7 +91,7 @@ Stock Duta firmware "just does the simple thing" the way QMK "just sends
 keycodes" — that's the *reference posture*, not the ceiling. Duta is a framework
 for putting **user-defined functionality** on a dev device: a module registers a
 handler, advertises it, and Sutra/MCP faithfully forward the high-level intent
-(`zigbee_join(...)`, `send_touch(x, y)`, anything) to that handler without having
+(`zigbee_join(...)`, `set_position(x, y)`, anything) to that handler without having
 to understand or bless the implementation. So a ZBOSS router, or a module that
 spoofs touch events through foil taped to a screen, is squarely *in* scope —
 Sutra accepts that the user knows what their on-board code does with the event.

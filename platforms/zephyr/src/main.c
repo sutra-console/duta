@@ -496,7 +496,7 @@ static void hal_pump(void *c) {
 
 // ---- demo INVOKE commands (user-defined; proves the framework extension point
 // on real hardware). The device owns these; Sutra forwards intents blind.
-//   0x0001 send_touch(x:u16,y:u16)  well-known — blips the status LED as an ack
+//   0x0001 set_position(x:u16,y:u16)  well-known — blips the status LED as an ack
 //   0x8001 blink(times:u8)          vendor — blink the status LED `times` (visible)
 //   0x8002 echo(bytes)->reply       vendor — echo the payload back (reply path)
 static void led_pulse(uint16_t on_ms, uint16_t off_ms) {
@@ -511,9 +511,9 @@ static uint8_t hal_cmd_desc(void *c, uint8_t index, uint16_t *id, uint8_t *nargs
   ARG_UNUSED(c);
   switch (index) {
   case 0:
-    *id = SKRIT_INVOKE_TOUCH; *nargs = 2;
+    *id = SKRIT_INVOKE_SET_POSITION; *nargs = 2;
     argtype[0] = SKRIT_ARG_U16; argtype[1] = SKRIT_ARG_U16;
-    *flags = 0; *name = "send_touch";
+    *flags = 0; *name = "set_position";
     break;
   case 1:
     *id = SKRIT_INVOKE_VENDOR_BASE + 1; *nargs = 1;
@@ -532,7 +532,7 @@ static uint8_t hal_cmd_invoke(void *c, uint16_t id, const uint8_t *p, uint8_t pl
                               uint8_t *reply, uint8_t cap, uint8_t *rlen) {
   ARG_UNUSED(c);
   *rlen = 0;
-  if (id == SKRIT_INVOKE_TOUCH) {
+  if (id == SKRIT_INVOKE_SET_POSITION) {
     if (plen < 4) return SKRIT_ST_BADARGS; // x(u16), y(u16)
     led_pulse(60, 0);
     return SKRIT_ST_OK;

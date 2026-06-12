@@ -76,7 +76,7 @@ enum {
                          //   write-only: rlen=0 · read-only: wlen=0 · NAK -> st 0x05 not-found
   // ---- INVOKE: user-defined commands (see "INVOKE" in PROTOCOL.md) ----
   // The device advertises its OWN command vocabulary; the host forwards a
-  // high-level intent (e.g. send_touch(x,y)) to whatever handler the device
+  // high-level intent (e.g. set_position(x,y)) to whatever handler the device
   // registered, without having to understand the implementation. This is the
   // framework's open-ended extension point — IO/PWM/RGB/CFG are the blessed
   // built-ins; INVOKE is how a module adds anything else.
@@ -230,12 +230,12 @@ enum { SKRIT_INVOKE_REPLY = 0x01 }; // command returns a reply payload (else sta
 
 // ---- INVOKE command ids (16-bit, LE) ----
 // Low half = the curated WELL-KNOWN registry (stable ids documented in
-// PROTOCOL.md, e.g. send_touch); high half = VENDOR / user-defined space a
+// PROTOCOL.md, e.g. set_position); high half = VENDOR / user-defined space a
 // device owns freely. A host that doesn't recognize an id still invokes it
 // generically from the INVOKE_DESC arg signature — unknown ids never hard-fail.
 #define SKRIT_INVOKE_VENDOR_BASE 0x8000
 enum {
-  SKRIT_INVOKE_TOUCH = 0x0001, // send_touch: x(u16), y(u16) — a tap at screen x,y
+  SKRIT_INVOKE_SET_POSITION = 0x0001, // set_position: x(u16), y(u16) — move to coordinate x,y
 };
 
 // ---- DATA medium (DATA_DESC kind): what the bridged channel carries. UART is
