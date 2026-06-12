@@ -34,6 +34,31 @@ ufbt launch               # build + upload + run on a connected Flipper
    get the console, outputs (the four GPIO pins + RGB LED), and macros.
 4. Wire a target's UART to header pins 13/14 (+ GND) to bridge its console.
 
+## Macros (on-device runner)
+
+The Flipper can run **skrit-mc** macro bytecode straight from its SD card — no
+Sutra round-trip. From the status screen press **OK** to open the macro list;
+**Up/Down** to pick, **OK** to run, **Back** to return.
+
+- Macros live in `SD:/apps_data/duta/` (the app's data dir, `/data` at runtime).
+- Each file is a skrit-mc program: `[0x01 ver, …ops…, 0x00 end]` — the same
+  bytecode the core VM runs (`SETOUT`/`SETPWM`/`SETRGB`/`EMIT`/`DELAY`…). It
+  drives the Flipper's own outputs (GPIO pins + RGB LED) and the DATA UART.
+- Three examples ship in [`macros/`](macros/) — copy them to the SD:
+  | File | What it does |
+  |------|--------------|
+  | `blink_led.skm` | blinks the RGB LED green 3× |
+  | `pulse_pa7.skm` | drives header pin PA7 high 500 ms, then low |
+  | `hello_uart.skm` | emits `hello\r\n` out the DATA UART (pin 13) |
+
+  ```sh
+  # with the Flipper mounted via qFlipper, or over ufbt:
+  ufbt cli storage mkdir /ext/apps_data/duta
+  ufbt cli storage send macros/blink_led.skm /ext/apps_data/duta/blink_led.skm
+  ```
+
+  (Sutra can export `.skm` files here later; for now drop them yourself.)
+
 ## Notes
 
 - `skrit_device.h` + `protocol.h` are **vendored** here (copied from

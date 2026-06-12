@@ -19,8 +19,14 @@
 #include <input/input.h>
 #include <notification/notification.h>
 #include <notification/notification_messages.h>
+#include <storage/storage.h>
 
 #include "skrit_device.h" // the portable core (vendored; pulls protocol.h locally)
+
+#define MACRO_DIR STORAGE_APP_DATA_PATH_PREFIX // "/data" -> SD:/apps_data/duta
+#define MACRO_MAX 24                            // listed macros
+#define MACRO_NAME 40
+#define MACRO_PROG 1024               // max bytecode per macro
 
 #define FW_LO 0x05
 #define FW_HI 0x00
@@ -60,7 +66,16 @@ typedef struct {
     uint8_t rgb[3];
     uint32_t rx_bytes, tx_bytes;
     bool running;
+    // on-device macro library (SD)
+    Storage* storage;
+    uint8_t view;    // 0 = status, 1 = macros
+    char macro_name[MACRO_MAX][MACRO_NAME];
+    uint8_t macro_count;
+    uint8_t macro_sel;
+    char macro_msg[28]; // last-run result line
 } Duta;
+
+enum { ViewStatus, ViewMacros };
 
 static Duta* g_duta;
 
@@ -209,10 +224,50 @@ static void uart_rx(FuriHalSerialHandle* handle, FuriHalSerialRxEvent event, voi
     }
 }
 
+// ---- on-device macro library (skrit-mc bytecode files on the SD) -----------
+static void duta_scan_macros(Duta* d) {
+    d->macro_count = 0;
+    File* dir = storage_file_alloc(d->storage);
+    if(storage_dir_open(dir, MACRO_DIR)) {
+        FileInfo fi;
+        char name[MACRO_NAME];
+        while(d->macro_count < MACRO_MAX && storage_dir_read(dir, &fi, name, sizeof(name))) {
+            if(file_info_is_dir(&fi) || name[0] == 0) continue;
+            strncpy(d->macro_name[d->macro_count], name, MACRO_NAME - 1);
+            d->macro_name[d->macro_count][MACRO_NAME - 1] = 0;
+            d->macro_count++;
+        }
+    }
+    storage_dir_close(dir);
+    storage_file_free(dir);
+    if(d->macro_sel >= d->macro_count) d->macro_sel = d->macro_count ? d->macro_count - 1 : 0;
+}
+
+// Load a macro file's bytecode and run it on the VM — standalone, no host.
+static void duta_run_macro(Duta* d, const char* name) {
+    char path[96];
+    snprintf(path, sizeof(path), "%s/%s", MACRO_DIR, name);
+    uint8_t* prog = malloc(MACRO_PROG);
+    File* f = storage_file_alloc(d->storage);
+    size_t n = 0;
+    if(storage_file_open(f, path, FSAM_READ, FSOM_OPEN_EXISTING))
+        n = storage_file_read(f, prog, MACRO_PROG);
+    storage_file_close(f);
+    storage_file_free(f);
+    if(n == 0) {
+        strncpy(d->macro_msg, "read failed", sizeof(d->macro_msg) - 1);
+    } else {
+        uint8_t st = skrit__run_program(&d->dev, prog, (uint16_t)n);
+        if(st == SKRIT_ST_OK)
+            snprintf(d->macro_msg, sizeof(d->macro_msg), "ran OK (%u B)", (unsigned)n);
+        else
+            snprintf(d->macro_msg, sizeof(d->macro_msg), "error %u", st);
+    }
+    free(prog);
+}
+
 // ---- GUI -------------------------------------------------------------------
-static void draw_callback(Canvas* canvas, void* ctx) {
-    Duta* d = ctx;
-    canvas_clear(canvas);
+static void draw_status(Canvas* canvas, Duta* d) {
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str(canvas, 2, 11, "DUTA");
     canvas_set_font(canvas, FontSecondary);
@@ -223,11 +278,7 @@ static void draw_callback(Canvas* canvas, void* ctx) {
     snprintf(line, sizeof(line), "DATA UART %lu", (unsigned long)d->baud);
     canvas_draw_str(canvas, 2, 25, line);
     snprintf(
-        line,
-        sizeof(line),
-        "rx %lu  tx %lu",
-        (unsigned long)d->rx_bytes,
-        (unsigned long)d->tx_bytes);
+        line, sizeof(line), "rx %lu  tx %lu", (unsigned long)d->rx_bytes, (unsigned long)d->tx_bytes);
     canvas_draw_str(canvas, 2, 35, line);
 
     canvas_draw_str(canvas, 2, 49, "OUT");
@@ -238,13 +289,48 @@ static void draw_callback(Canvas* canvas, void* ctx) {
         else
             canvas_draw_frame(canvas, x, 42, 11, 8);
     }
-    // RGB swatch (filled if lit)
-    if(d->out_state[RGB_IDX])
+    if(d->out_state[RGB_IDX]) // the RGB LED swatch
         canvas_draw_box(canvas, 24 + N_GPIO * 14, 42, 11, 8);
     else
         canvas_draw_frame(canvas, 24 + N_GPIO * 14, 42, 11, 8);
 
-    canvas_draw_str(canvas, 2, 62, "Open the USB serial in Sutra");
+    canvas_draw_str(canvas, 2, 62, "OK: macros   USB: Sutra");
+}
+
+static void draw_macros(Canvas* canvas, Duta* d) {
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str(canvas, 2, 11, "Macros");
+    canvas_set_font(canvas, FontSecondary);
+    canvas_draw_line(canvas, 0, 14, 128, 14);
+    if(d->macro_count == 0) {
+        canvas_draw_str(canvas, 2, 30, "No macros on SD.");
+        canvas_draw_str(canvas, 2, 42, "Drop *.skm bytecode in");
+        canvas_draw_str(canvas, 2, 52, "apps_data/duta/");
+        return;
+    }
+    // a 4-row window around the selection
+    uint8_t top = d->macro_sel >= 3 ? d->macro_sel - 3 : 0;
+    for(uint8_t i = 0; i < 4 && top + i < d->macro_count; i++) {
+        uint8_t mi = top + i;
+        int y = 25 + i * 11;
+        if(mi == d->macro_sel) canvas_draw_box(canvas, 0, y - 9, 128, 11);
+        canvas_set_color(canvas, mi == d->macro_sel ? ColorWhite : ColorBlack);
+        canvas_draw_str(canvas, 3, y, d->macro_name[mi]);
+        canvas_set_color(canvas, ColorBlack);
+    }
+    if(d->macro_msg[0]) {
+        canvas_draw_line(canvas, 0, 53, 128, 53);
+        canvas_draw_str(canvas, 2, 62, d->macro_msg);
+    }
+}
+
+static void draw_callback(Canvas* canvas, void* ctx) {
+    Duta* d = ctx;
+    canvas_clear(canvas);
+    if(d->view == ViewMacros)
+        draw_macros(canvas, d);
+    else
+        draw_status(canvas, d);
 }
 static void input_callback(InputEvent* event, void* ctx) {
     FuriMessageQueue* q = ctx;
@@ -314,6 +400,10 @@ int32_t duta_app(void* p) {
     h->pump = hal_pump;
     skrit_dev_init(&d->dev, h, NULL, /*muxed*/ 1);
 
+    // on-device macro library (SD)
+    d->storage = furi_record_open(RECORD_STORAGE);
+    duta_scan_macros(d);
+
     uint8_t buf[64];
     uint32_t last_draw = 0;
     while(d->running) {
@@ -325,8 +415,37 @@ int32_t duta_app(void* p) {
         skrit_dev_poll(&d->dev);
 
         InputEvent ev;
-        if(furi_message_queue_get(d->input_q, &ev, 0) == FuriStatusOk)
-            if(ev.type == InputTypeShort && ev.key == InputKeyBack) d->running = false;
+        if(furi_message_queue_get(d->input_q, &ev, 0) == FuriStatusOk) {
+            if(ev.type == InputTypeShort || ev.type == InputTypeRepeat) {
+                bool redraw = true;
+                if(d->view == ViewStatus) {
+                    if(ev.key == InputKeyOk) {
+                        duta_scan_macros(d);
+                        d->macro_msg[0] = 0;
+                        d->view = ViewMacros;
+                    } else if(ev.key == InputKeyBack) {
+                        d->running = false;
+                    } else {
+                        redraw = false;
+                    }
+                } else { // ViewMacros
+                    if(ev.key == InputKeyUp && d->macro_sel) {
+                        d->macro_sel--;
+                    } else if(ev.key == InputKeyDown && d->macro_sel + 1 < d->macro_count) {
+                        d->macro_sel++;
+                    } else if(ev.key == InputKeyOk && d->macro_count) {
+                        strncpy(d->macro_msg, "running...", sizeof(d->macro_msg) - 1);
+                        view_port_update(d->vp);
+                        duta_run_macro(d, d->macro_name[d->macro_sel]);
+                    } else if(ev.key == InputKeyBack) {
+                        d->view = ViewStatus;
+                    } else {
+                        redraw = false;
+                    }
+                }
+                if(redraw) view_port_update(d->vp);
+            }
+        }
 
         if(furi_get_tick() - last_draw > 100) {
             view_port_update(d->vp);
@@ -350,6 +469,7 @@ int32_t duta_app(void* p) {
         furi_hal_gpio_init(duta_gpio[i].pin, GpioModeAnalog, GpioPullNo, GpioSpeedLow);
     duta_led_apply(0, 0, 0);
     furi_record_close(RECORD_NOTIFICATION);
+    furi_record_close(RECORD_STORAGE);
     furi_message_queue_free(d->input_q);
     furi_stream_buffer_free(d->usb_rx);
     furi_stream_buffer_free(d->uart_rx);
