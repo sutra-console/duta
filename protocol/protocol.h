@@ -74,6 +74,19 @@ enum {
   SKRIT_I2C_SCAN = 0x60, // (none) -> st, bitmap(16): bit (a&7) of byte (a>>3) = addr a ACKed
   SKRIT_I2C_XFER = 0x61, // addr(1), wlen(1), w..., rlen(1) -> st, addr(1), r...
                          //   write-only: rlen=0 · read-only: wlen=0 · NAK -> st 0x05 not-found
+  // ---- INVOKE: user-defined commands (see "INVOKE" in PROTOCOL.md) ----
+  // The device advertises its OWN command vocabulary; the host forwards a
+  // high-level intent (e.g. send_touch(x,y)) to whatever handler the device
+  // registered, without having to understand the implementation. This is the
+  // framework's open-ended extension point — IO/PWM/RGB/CFG are the blessed
+  // built-ins; INVOKE is how a module adds anything else.
+  SKRIT_INVOKE_DESC = 0x70, // index(1) -> index, total(1)[, id(2), nargs(1),
+                            //   argtype(1)*nargs, flags(1), name]: the command MENU
+                            //   (iterate index 0..total-1, like PIN_CAPS).
+  SKRIT_INVOKE = 0x71,      // id(2 LE), payload... -> st, id(2), reply...
+                            //   unknown id -> 0x05 not-found; device with no INVOKE
+                            //   support -> 0x07 unsupported. payload packs the args
+                            //   per the DESC signature (see INVOKE arg codec).
   // Async device->host events (0x50..0x5F): RESP bit clear, SEQ=0, NOT request/reply.
   // A host routes TYPE in this range to an event sink, never the seq-matcher.
   SKRIT_EVENT_LOG = 0x50,   // text(...): device log line (e.g. macro progress)
@@ -119,6 +132,7 @@ enum {
   SKRIT_FLAG_AUTH_REQUIRED = 0x01, // AUTH needed before other commands / DATA
   SKRIT_FLAG_DEFAULT_CRED = 0x02,  // still the factory password; prompt a change
   SKRIT_FLAG_PROVISION = 0x04,     // accepts runtime IO provisioning (PIN_CAPS/CONFIG_*)
+  SKRIT_FLAG_INVOKE = 0x08,        // answers INVOKE_DESC/INVOKE (user-defined commands)
 };
 // Factory default password (network devices ship with this; change on first use).
 #define SKRIT_DEFAULT_PASSWORD "duta"
@@ -164,6 +178,7 @@ enum {                        // opcodes (low nibble groups by tier)
   SKRIT_MC_SETOUT = 0x03,     // index(1), val(1)                         [tier 1]
   SKRIT_MC_SETPWM = 0x04,     // index(1), duty(2) 0..1023                [tier 1]
   SKRIT_MC_SETRGB = 0x05,     // index(1), r(1), g(1), b(1) -> fill all   [tier 1]
+  SKRIT_MC_INVOKE = 0x06,     // id(2), n(1), payload[n] -> INVOKE        [tier 1]
   SKRIT_MC_EXPECT = 0x10,     // timeout(2), n(1), bytes[n] -> outcome    [tier 2]
   SKRIT_MC_WAITIO = 0x11,     // index(1), cmp(1), val(2), timeout(2)     [tier 2]
   SKRIT_MC_WAITOK = 0x12,     // halt FAIL if last outcome is FAIL        [tier 2]
@@ -194,6 +209,34 @@ enum {
 
 // ---- input types (INPUT_DESC body[2]) ----
 enum { SKRIT_IN_DIGITAL = 0, SKRIT_IN_ANALOG = 1 };
+
+// ---- INVOKE arg types (INVOKE_DESC argtype bytes) ----
+// How a host packs each arg into the INVOKE payload. Fixed types are
+// little-endian and packed back-to-back; BYTES/STR are length-prefixed
+// (len(1) then `len` bytes). A host can build a generic typed form from the
+// signature alone — the well-known catalog (PROTOCOL.md) only adds nicer
+// labels/widgets on top.
+enum {
+  SKRIT_ARG_U8 = 0,
+  SKRIT_ARG_U16 = 1,
+  SKRIT_ARG_U32 = 2,
+  SKRIT_ARG_I16 = 3,
+  SKRIT_ARG_I32 = 4,
+  SKRIT_ARG_BYTES = 5, // len(1), bytes[len]
+  SKRIT_ARG_STR = 6,   // len(1), utf8[len]
+};
+// ---- INVOKE_DESC per-command flags byte ----
+enum { SKRIT_INVOKE_REPLY = 0x01 }; // command returns a reply payload (else status only)
+
+// ---- INVOKE command ids (16-bit, LE) ----
+// Low half = the curated WELL-KNOWN registry (stable ids documented in
+// PROTOCOL.md, e.g. send_touch); high half = VENDOR / user-defined space a
+// device owns freely. A host that doesn't recognize an id still invokes it
+// generically from the INVOKE_DESC arg signature — unknown ids never hard-fail.
+#define SKRIT_INVOKE_VENDOR_BASE 0x8000
+enum {
+  SKRIT_INVOKE_TOUCH = 0x0001, // send_touch: x(u16), y(u16) — a tap at screen x,y
+};
 
 // ---- DATA medium (DATA_DESC kind): what the bridged channel carries. UART is
 // the default (a raw byte console); the rest are the roadmap. A device that
