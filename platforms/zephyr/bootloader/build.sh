@@ -27,11 +27,16 @@ git -C "${work}" submodule update --init --depth 1
 echo "==> overlaying boards/${BOARD}"
 cp -r "${here}/boards/${BOARD}" "${work}/src/boards/${BOARD}"
 
-echo "==> make BOARD=${BOARD} all"
-make -C "${work}" BOARD="${BOARD}" all
+# Build ONLY the bootloader self-update UF2 — not `all`, which also makes the
+# SoftDevice-merged hex/zip and needs Nordic's mergehex/nrfjprog. The _nosd.uf2
+# chain is just gcc + objcopy + uf2conv.py (python3), which is all the container
+# (Containerfile) carries.
+ver="$(git -C "${work}" describe --dirty --always --tags 2>/dev/null || echo local)"
+uf2="_build/build-${BOARD}/update-${BOARD}_bootloader-${ver}_nosd.uf2"
+echo "==> make BOARD=${BOARD} ${uf2}"
+make -C "${work}" BOARD="${BOARD}" "${uf2}"
 
 mkdir -p "${dist}"
-uf2="$(ls "${work}"/_build/build-"${BOARD}"/update-"${BOARD}"_bootloader-*_nosd.uf2 | head -1)"
-cp "${uf2}" "${dist}/"
+cp "${work}/${uf2}" "${dist}/"
 echo "==> wrote ${dist}/$(basename "${uf2}")"
 echo "    drag it onto the current bootloader's drive (SWD pads are the backup)."

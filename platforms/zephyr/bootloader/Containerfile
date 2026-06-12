@@ -1,0 +1,15 @@
+# Reproducible build env for the Duta nRF52 UF2 bootloader — no host toolchain.
+#   podman build -t duta-nrf-bl .
+#   podman run --name dutabl duta-nrf-bl          # runs build.sh -> /src/dist
+#   podman cp dutabl:/src/dist ./ ; podman rm dutabl
+FROM docker.io/library/debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
+      make git ca-certificates python3 python-is-python3 python3-intelhex \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . /src
+RUN sed -i 's/\r$//' build.sh   # tolerate CRLF from a Windows checkout
+CMD ["bash", "build.sh"]
