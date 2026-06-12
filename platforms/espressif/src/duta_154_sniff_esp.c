@@ -51,33 +51,44 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 // 802.15.4 driver task; copy the frame into the ring and return promptly.
 void esp_ieee802154_receive_done(uint8_t *frame, esp_ieee802154_frame_info_t *info) {
   uint8_t len = frame[0]; // PSDU length incl. FCS
-  if (len < 2 || len > 127) return;
-  uint8_t nh = (uint8_t)((r_head + 1u) % RING);
-  if (nh == r_tail) return; // ring full -> drop (host isn't draining)
-  volatile sniff_rec *s = &ring[r_head];
-  s->len = len;
-  s->channel = info ? info->channel : chan;
-  s->rssi = info ? info->rssi : 0;
-  s->lqi = info ? info->lqi : 0xFF;
-  s->fcs_ok = 1; // the driver delivers only FCS-valid frames here
-  memcpy((void *)s->psdu, frame + 1, len);
-  r_head = nh;
+  if (len >= 2 && len <= 127) {
+    uint8_t nh = (uint8_t)((r_head + 1u) % RING);
+    if (nh != r_tail) { // ring has room (else drop — host isn't draining)
+      volatile sniff_rec *s = &ring[r_head];
+      s->len = len;
+      s->channel = info ? info->channel : chan;
+      s->rssi = info ? info->rssi : 0;
+      s->lqi = info ? info->lqi : 0xFF;
+      s->fcs_ok = 1; // the driver delivers only FCS-valid frames here
+      memcpy((void *)s->psdu, frame + 1, len);
+      r_head = nh;
+    }
+  }
+  // CRITICAL: hand the RX buffer back to the driver so it keeps receiving. Skip
+  // this and the pool exhausts after a few frames and RX silently stalls.
+  esp_ieee802154_receive_handle_done(frame);
 }
 
 void duta_154_sniff_esp_init(void) {
   esp_ieee802154_enable();
   esp_ieee802154_set_promiscuous(true); // capture all frames (no address filter)
-  esp_ieee802154_set_rx_when_idle(true); // stay in RX between frames
   esp_ieee802154_set_channel(chan);
+}
+
+// Enter RX on `chan`. Order matters: receive() first, then rx_when_idle(true) so
+// the radio re-arms after each frame (matches the IDF ieee802154 CLI example).
+static void rx_arm(void) {
+  esp_ieee802154_set_channel(chan);
+  esp_ieee802154_receive();
+  esp_ieee802154_set_rx_when_idle(true);
 }
 
 void duta_154_sniff_esp_start(void) {
   if (active) return;
   active = true;
   chan = fixed_chan ? fixed_chan : CH_MIN;
-  esp_ieee802154_set_channel(chan);
   last_ms = now_ms();
-  esp_ieee802154_receive();
+  rx_arm();
 }
 
 void duta_154_sniff_esp_stop(void) {
@@ -92,10 +103,7 @@ void duta_154_sniff_esp_set_channel(uint8_t ch) {
   fixed_chan = (ch >= CH_MIN && ch <= CH_MAX) ? ch : 0; // out of range => auto-hop
   chan = fixed_chan ? fixed_chan : CH_MIN;
   last_ms = now_ms();
-  if (active) {
-    esp_ieee802154_set_channel(chan);
-    esp_ieee802154_receive();
-  }
+  if (active) rx_arm();
 }
 
 uint8_t duta_154_sniff_esp_get_channel(void) { return chan; }
@@ -116,8 +124,7 @@ uint16_t duta_154_sniff_esp_take(uint8_t *out, uint16_t cap) {
     // (unless pinned). 802.15.4 nets live on ONE channel; drift until we find it.
     if (!fixed_chan && (now_ms() - last_ms) >= DWELL_MS) {
       chan = (chan >= CH_MAX) ? CH_MIN : (uint8_t)(chan + 1);
-      esp_ieee802154_set_channel(chan);
-      esp_ieee802154_receive();
+      rx_arm();
       last_ms = now_ms();
     }
     return 0;
