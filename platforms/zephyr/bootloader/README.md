@@ -37,15 +37,20 @@ build.sh         clone pinned upstream + overlay this board + make
 
 ## Build
 
-Needs `arm-none-eabi-gcc` + `make` on PATH and Nordic **`nrfutil`** (for the
-self-update package). Then:
+**Containerized (recommended — no host toolchain).** The `Containerfile` carries
+everything (gcc-arm-none-eabi + newlib + make + python3 + intelhex):
 
 ```sh
-./build.sh         # -> dist/update-duta_nrf52840_bootloader-<ver>_nosd.uf2
+podman build -t duta-nrf-bl .
+podman run --name dutabl duta-nrf-bl        # clones pinned upstream + builds
+podman cp dutabl:/src/dist ./ && podman rm dutabl
+# -> dist/update-duta_nrf52840_bootloader-<ver>_nosd.uf2  (~76 KB)
 ```
 
-(`build.sh` clones the pinned Adafruit bootloader into `.upstream/`, overlays
-`boards/duta_nrf52840`, and runs `make BOARD=duta_nrf52840 all`.)
+**Host build.** If you have `arm-none-eabi-gcc` + newlib + `make` + `python3`
+(with `intelhex`) on PATH, just `./build.sh`. It clones the pinned Adafruit
+bootloader into `.upstream/`, overlays `boards/duta_nrf52840`, and builds **only**
+the self-update `_nosd.uf2` (no Nordic `mergehex`/`nrfjprog` needed).
 
 ## Flash (UF2 self-update — no probe)
 
