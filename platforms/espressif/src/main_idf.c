@@ -28,6 +28,8 @@
 #include "board.h"            // duta_outputs[] + role pins + BOARD_NAME + DUTA_RGB_*
 #include "duta_ws2812_rmt.h"  // onboard addressable LED
 #include "skrit_device.h"     // the portable core
+#include "duta_i2c.h"         // I2C master DATA backend (new i2c_master driver)
+#include "duta_wifi_idf.h"    // WiFi + WebSocket bridge + captive portal (lwip)
 
 #define FW_LO 0x04
 #define FW_HI 0x00
@@ -50,6 +52,8 @@ static uint8_t g_out[DUTA_N_OUT > 0 ? DUTA_N_OUT : 1];
 static uint16_t g_duty[DUTA_N_OUT > 0 ? DUTA_N_OUT : 1];
 static int8_t g_pwm_ch[DUTA_N_OUT > 0 ? DUTA_N_OUT : 1]; // LEDC channel per PWM output, else -1
 static uint32_t g_baud = 115200;
+static uint8_t g_data_kind = SKRIT_DATA_UART; // UART console (default) or I2C master
+static skrit_hal HAL;                         // filled in app_main; referenced by data_kind_apply
 
 static inline bool is_io(uint8_t i) { return duta_outputs[i].type == SKRIT_CTRL_IO; }
 static inline bool is_pwm(uint8_t i) { return duta_outputs[i].type == SKRIT_CTRL_PWM; }
@@ -245,7 +249,80 @@ static uint8_t board_caps(void) {
   return caps;
 }
 
-static skrit_hal HAL;
+// ---- DATA medium kind (UART console default / I2C master), persisted in NVS --
+static void data_kind_save(uint8_t k) {
+  nvs_handle_t h;
+  if (nvs_open("duta", NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_set_u8(h, "dkind", k);
+  nvs_commit(h);
+  nvs_close(h);
+}
+static uint8_t data_kind_load(void) {
+  nvs_handle_t h;
+  uint8_t k = SKRIT_DATA_UART;
+  if (nvs_open("duta", NVS_READONLY, &h) == ESP_OK) {
+    nvs_get_u8(h, "dkind", &k);
+    nvs_close(h);
+  }
+  return (k == SKRIT_DATA_I2C) ? SKRIT_DATA_I2C : SKRIT_DATA_UART;
+}
+static void data_kind_apply(uint8_t kind) {
+  g_data_kind = kind;
+  HAL.data_kind = kind;
+  if (kind == SKRIT_DATA_I2C) duta_i2c_begin();
+  else duta_i2c_end();
+}
+
+// ---- CFG_GET/SET: DATA pins + kind (WiFi keys arrive with the WiFi port) -----
+static int16_t hal_cfg_get(void *c, uint8_t key, uint8_t *out, uint8_t cap) {
+  (void)c;
+  if (key == SKRIT_CFG_DATA_PINS) {
+    if (cap < 4) return -1;
+    int16_t tx = DATA_TX_PIN, rx = DATA_RX_PIN;
+    out[0] = (uint8_t)tx;
+    out[1] = (uint8_t)(tx >> 8);
+    out[2] = (uint8_t)rx;
+    out[3] = (uint8_t)(rx >> 8);
+    return 4;
+  }
+  if (key == SKRIT_CFG_DATA_KIND) {
+    if (cap < 1) return -1;
+    out[0] = g_data_kind;
+    return 1;
+  }
+  return duta_wifi_cfg_get(key, out, cap); // WIFI_SSID/PASS/STATUS
+}
+static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len) {
+  (void)c;
+  if (key == SKRIT_CFG_DATA_KIND) {
+    if (len != 1) return SKRIT_ST_BADARGS;
+    if (val[0] != SKRIT_DATA_UART && val[0] != SKRIT_DATA_I2C) return SKRIT_ST_BADARGS;
+    data_kind_apply(val[0]);
+    data_kind_save(val[0]);
+    return SKRIT_ST_OK;
+  }
+  return duta_wifi_cfg_set(key, val, len); // WIFI_SSID/PASS
+}
+
+// ---- I2C HAL: do the transfer, then emit a DATA record when DATA kind = i2c --
+static void i2c_emit_record(uint8_t addr, uint8_t flags, const uint8_t *w, uint8_t wlen,
+                            const uint8_t *r, uint8_t rlen) {
+  uint8_t rec[8 + 255];
+  uint16_t n = duta_i2c_record(rec, sizeof rec, addr, flags, w, wlen, r, rlen);
+  if (n) { skrit_dev_feed_data(&g_dev, rec, n); duta_wifi_feed(rec, n); } // tee to USB + WS
+}
+static uint8_t hal_i2c_scan(void *c, uint8_t bitmap[16]) {
+  (void)c;
+  return duta_i2c_scan(bitmap);
+}
+static uint8_t hal_i2c_xfer(void *c, uint8_t addr, const uint8_t *w, uint8_t wlen, uint8_t *r, uint8_t rlen) {
+  (void)c;
+  uint8_t st = duta_i2c_xfer(addr, w, wlen, r, rlen);
+  uint8_t flags = (uint8_t)((rlen ? 1 : 0) | (st != SKRIT_ST_OK ? 2 : 0));
+  if (g_data_kind == SKRIT_DATA_I2C && st != SKRIT_ST_UNSUPPORTED)
+    i2c_emit_record(addr, flags, w, wlen, st == SKRIT_ST_OK ? r : NULL, st == SKRIT_ST_OK ? rlen : 0);
+  return st;
+}
 
 void app_main(void) {
   nvs_flash_init();
@@ -283,13 +360,25 @@ void app_main(void) {
   HAL.reboot = hal_reboot;
   HAL.millis = hal_millis;
   HAL.pump = hal_pump;
+  HAL.cfg_get = hal_cfg_get; // DATA pins + kind
+  HAL.cfg_set = hal_cfg_set;
+  HAL.i2c_scan = hal_i2c_scan; // I2C master (active when DATA kind = i2c)
+  HAL.i2c_xfer = hal_i2c_xfer;
   skrit_dev_init(&g_dev, &HAL, NULL, /*muxed*/ 1);
+  data_kind_apply(data_kind_load()); // restore the persisted bridged medium
+  duta_wifi_init(&HAL);              // WS bridge: copies the HAL, joins / raises the portal
 
-  uint8_t buf[64];
+  uint8_t buf[64], db[64];
   for (;;) {
-    skrit_dev_poll(&g_dev); // tee the target console out the mux link
+    // UART kind: read the target console ONCE and tee it to both links (USB + WS),
+    // each with its own session/auth state. I2C kind: records come from I2C_XFER.
+    if (g_data_kind == SKRIT_DATA_UART) {
+      uint16_t got = hal_data_read(NULL, db, sizeof db);
+      if (got) { skrit_dev_feed_data(&g_dev, db, got); duta_wifi_feed(db, got); }
+    }
     int n = usb_serial_jtag_read_bytes(buf, sizeof buf, 0);
-    for (int i = 0; i < n; i++) skrit_dev_rx(&g_dev, buf[i]); // CMD + host DATA in
+    for (int i = 0; i < n; i++) skrit_dev_rx(&g_dev, buf[i]); // CMD + host DATA in over USB
+    duta_wifi_loop();                                         // WiFi state machine + WS pump
     vTaskDelay(1);
   }
 }
