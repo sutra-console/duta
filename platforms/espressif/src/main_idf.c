@@ -23,7 +23,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
+// RTC_CNTL register block (download-boot poke below) only exists on the S3/C3
+// here; the C6 replaced it with the LP_AON/PMU domain, so guard the include.
+#if defined(BOARD_ESP32S3) || defined(BOARD_S3_ZERO) || defined(BOARD_ESP32C3)
 #include "soc/rtc_cntl_reg.h"
+#endif
 
 #include "board.h" // duta_outputs[] + role pins + BOARD_NAME + DUTA_RGB_* + mcu pins
 
