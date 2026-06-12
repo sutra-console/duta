@@ -55,6 +55,33 @@ directly. Works for any UART Duta, not just nRF52.
   *multiplexed* router (Flipper stays a node AND forwards a second device) is
   future work pending a skrit device-addressing extension.
 
+## Planned: Zigbee Router mode
+
+Goal: the Flipper + an attached **nRF52840** (which has the 802.15.4 radio the
+Flipper lacks) join a Zigbee network as a **router** — standalone, no PC — using
+the network key + model from the SD card. It builds on Bridge mode (the nRF52
+hangs off the header UART) and adds a Zigbee brain. **Not built yet**; two
+architecture paths, decision pending:
+
+1. **Dumb radio + Flipper brain** (matches the project thesis — see the Sutra
+   network model). The nRF52 stays a raw 802.15.4 transceiver (`duta_154_sniff_tx`:
+   it just TX/RXes MAC bytes, knows nothing of Zigbee); the **Flipper** runs the
+   Zigbee NWK/APS layer — AES-128-CCM* crypto, frame-counter management, route
+   relay, join handling — reading key/PAN/channel from
+   `apps_data/duta/networks.json` (a copy of Sutra's `.sutra/networks.json`).
+   *Pro:* one firmware serves Zigbee/Thread/Matter, evolves with no reflash.
+   *Con:* we implement Zigbee routing on the Flipper. **Gated on network-model
+   phase B** (the AES-CCM* frame builder — not started).
+
+2. **Smart radio (ZBOSS) on the nRF52.** The nRF52 runs a conformant Zigbee
+   router stack (nRF Connect SDK / ZBOSS); the Flipper just pushes the network
+   key + role via skrit `CFG` from the SD card, then bridges. *Pro:* a real
+   router nearly for free. *Con:* breaks the dumb-radio model; pulls in the nRF
+   Connect SDK toolchain.
+
+Either way: the Flipper supplies the keys (from SD) + the UI; the nRF52 supplies
+the radio. The host-side crypto plan lives in the Sutra network model.
+
 ## Macros (on-device runner)
 
 The Flipper can run **skrit-mc** macro bytecode straight from its SD card — no
