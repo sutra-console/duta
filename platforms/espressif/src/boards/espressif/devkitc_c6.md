@@ -42,12 +42,29 @@ Native USB-C (esptool over GPIO12/13). Hold **BOOT**, tap **RESET**, release to
 enter the ROM downloader; or the app's *Reboot → bootloader* once Duta is running.
 The ROM downloader is in silicon, so the board is unbrickable.
 
-> **Pure-IDF note:** PlatformIO's `framework = espidf` does **not** emit
-> `bootloader.bin`, so `pio run -t upload` fails. Flash the three images directly
-> with esptool — a chip-matching bootloader comes from the arduino-esp32 libs
-> (`framework-arduinoespressif32-libs/esp32c6/bin/bootloader_<mode>_<freq>.elf`,
-> `esptool elf2image` it), the partition table + app from `.pio/build/esp32c6/`.
-> Use the flash mode/freq the embedded flash supports.
+> **Pure-IDF flashing recipe (hard-won — works):** PlatformIO's
+> `framework = espidf` does **not** emit `bootloader.bin`, and the C6 native
+> USB-Serial/JTAG can't be reset-to-app by esptool (it lands in download). So:
+>
+> 1. **Flash over the CH343/UART port** (`COM4`-style, the *second* USB-C), not
+>    the native USB — the UART bridge has the classic DTR/RTS auto-reset, so
+>    esptool flashes **and** cleanly boots the app.
+> 2. **Bootloader:** the pure-IDF build has none; borrow a chip-matching one from
+>    the arduino libs but use **DIO @ 40 MHz** (the in-package GD25Q32 hangs on
+>    QIO@80M → `TG0_WDT` boot loop):
+>    `esptool --chip esp32c6 elf2image framework-arduinoespressif32-libs/esp32c6/bin/bootloader_dio_40m.elf`.
+> 3. Flash all three with the conservative params, e.g.:
+>    ```sh
+>    uvx esptool --chip esp32c6 --port COM4 --before default-reset --after hard-reset \
+>      write-flash --flash-mode dio --flash-freq 40m --flash-size 4MB \
+>      0x0 bootloader_dio_40m.bin 0x8000 .pio/build/esp32c6/partitions.bin \
+>      0x10000 .pio/build/esp32c6/firmware.bin
+>    ```
+>
+> The **boot/console log appears on the CH343/UART port** (U0), and the **skrit
+> mux on the native USB** (`303A:1001`). Verified: PING→PONG, DEVICE_NAME→
+> "Duta ESP32-C6". (The durable fix is building our own bootloader via an
+> esp-idf container, which would drop the arduino-bootloader borrow.)
 
 ## Duta on this board
 
