@@ -43,8 +43,10 @@
 #define duta_sniffer_stop duta_sniff_stop
 #define duta_sniffer_is_on duta_sniff_is_on
 #define duta_sniffer_take duta_sniff_take
-// BLE advertising sniffer hops 37/38/39 internally and is receive-only:
-// no DUTA_SNIFF_HAS_CHANNEL, no DUTA_SNIFF_HAS_TX.
+// BLE advertising sniffer hops 37/38/39 internally; RX-only FOR NOW (no
+// DUTA_SNIFF_HAS_CHANNEL/HAS_TX yet). TX (raw adv-PDU injection) is intended —
+// the nRF raw radio can transmit a crafted BLE PDU the same way the 802.15.4
+// backend injects; not wired yet. The end state is TX+RX like ieee802154.
 
 // ---- nRF IEEE 802.15.4 sniffer (Zephyr/nRF; Zigbee/Thread PHY, channels 11-26) -
 #elif defined(CONFIG_DUTA_SNIFF_154)
@@ -72,9 +74,11 @@
 #define duta_sniffer_stop duta_ble_sniff_esp_stop
 #define duta_sniffer_is_on duta_ble_sniff_esp_is_on
 #define duta_sniffer_take duta_ble_sniff_esp_take
-// Scan-based: advertising only, RX-only (no DUTA_SNIFF_HAS_TX), channel hopped
-// internally by the controller (no DUTA_SNIFF_HAS_CHANNEL). Same DATA records,
-// different radio — proof the contract spans chips, not just the nRF.
+// Scan-based: advertising-RX only FOR NOW (no DUTA_SNIFF_HAS_TX/CHANNEL yet),
+// the controller hops internally. Same DATA records, different radio — proof the
+// contract spans chips. TX is intended but constrained here: the ESP BLE is
+// CONTROLLER-based, so injection means "advertise custom adv data" (esp_ble_gap),
+// not the arbitrary raw-PDU injection the nRF raw radio allows. Not wired yet.
 
 // ---- ESP32-C6/H2 IEEE 802.15.4 sniffer+injector (espressif/pure-IDF; native
 //      802.15.4 radio via esp_ieee802154, channels 11-26). Same record + TX
