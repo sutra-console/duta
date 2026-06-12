@@ -1,0 +1,16 @@
+App(
+    appid="duta",
+    name="Duta",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="duta_app",
+    stack_size=4 * 1024,
+    fap_category="GPIO",
+    fap_description=(
+        "Turn the Flipper into a Duta skrit node: a USB<->UART console bridge with "
+        "GPIO-header outputs and the RGB LED, driven by the Sutra desktop app / MCP "
+        "over the USB serial."
+    ),
+    fap_author="sutra-console",
+    fap_version="1.0",
+    requires=["gui", "notification"],
+)

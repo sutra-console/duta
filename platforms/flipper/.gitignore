@@ -1,0 +1,5 @@
+# ufbt build output + IDE scaffolding (rebuild with `ufbt`)
+/dist/
+/.ufbt/
+/.vscode/
+*.fap
