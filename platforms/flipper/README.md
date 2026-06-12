@@ -34,6 +34,27 @@ ufbt launch               # build + upload + run on a connected Flipper
    get the console, outputs (the four GPIO pins + RGB LED), and macros.
 4. Wire a target's UART to header pins 13/14 (+ GND) to bridge its console.
 
+## Passthrough bridge (USB ⟷ UART)
+
+From the status screen press **▶ (Right)** to enter **Bridge** mode: the Flipper
+stops being its own skrit node and wires its USB CDC straight to the GPIO-header
+UART (pin 13 TX / 14 RX), byte-for-byte. Sutra (or anything on the serial port)
+then talks **straight through** to whatever is on the UART.
+
+The headline use: hang a second Duta off the header UART — e.g. an **nRF52840
+running Duta** — and the Flipper becomes a dumb wire to it. Sutra drives the
+nRF52's BLE / 802.15.4 (Zigbee/Thread/Matter) radio as if it were plugged in
+directly. Works for any UART Duta, not just nRF52.
+
+- **Up/Down** cycle the bridge baud (9600 … 921600; default 115200 — match the
+  downstream device). **Back** returns to node mode (and restores the DATA baud).
+- The RGB LED glows **blue** while bridging; the screen shows the byte counters
+  each way.
+- One direction at a time: while bridging, the Flipper's own skrit node + macros
+  are paused (it's a wire, not a node). This is the no-protocol-change bridge; a
+  *multiplexed* router (Flipper stays a node AND forwards a second device) is
+  future work pending a skrit device-addressing extension.
+
 ## Macros (on-device runner)
 
 The Flipper can run **skrit-mc** macro bytecode straight from its SD card — no

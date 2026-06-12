@@ -73,9 +73,19 @@ typedef struct {
     uint8_t macro_count;
     uint8_t macro_sel;
     char macro_msg[28]; // last-run result line
+    // transparent passthrough bridge (USB CDC <-> GPIO UART, raw bytes)
+    uint8_t baud_idx;       // index into bridge_bauds[]
+    uint32_t br_rx, br_tx;  // bytes forwarded each way while bridging
 } Duta;
 
-enum { ViewStatus, ViewMacros };
+// In ViewBridge the Flipper stops being a skrit node and just wires its USB CDC
+// to the GPIO-header UART byte-for-byte — so Sutra (or anything) talks straight
+// through to a downstream UART Duta (e.g. an nRF52 forwarding BLE / 802.15.4).
+enum { ViewStatus, ViewMacros, ViewBridge };
+
+static const uint32_t bridge_bauds[] =
+    {9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600};
+#define N_BAUD (sizeof(bridge_bauds) / sizeof(bridge_bauds[0]))
 
 static Duta* g_duta;
 
@@ -266,6 +276,13 @@ static void duta_run_macro(Duta* d, const char* name) {
     free(prog);
 }
 
+// ---- passthrough bridge ----------------------------------------------------
+static void duta_bridge_set_baud(Duta* d, uint8_t idx) {
+    if(idx >= N_BAUD) return;
+    d->baud_idx = idx;
+    if(d->serial) furi_hal_serial_set_br(d->serial, bridge_bauds[idx]);
+}
+
 // ---- GUI -------------------------------------------------------------------
 static void draw_status(Canvas* canvas, Duta* d) {
     canvas_set_font(canvas, FontPrimary);
@@ -294,7 +311,28 @@ static void draw_status(Canvas* canvas, Duta* d) {
     else
         canvas_draw_frame(canvas, 24 + N_GPIO * 14, 42, 11, 8);
 
-    canvas_draw_str(canvas, 2, 62, "OK: macros   USB: Sutra");
+    canvas_draw_str(canvas, 2, 62, "OK macros  > bridge");
+}
+
+// Passthrough: USB CDC wired straight to the GPIO UART. The Flipper is a dumb
+// wire to a downstream UART Duta (e.g. an nRF52 doing BLE / 802.15.4).
+static void draw_bridge(Canvas* canvas, Duta* d) {
+    canvas_set_font(canvas, FontPrimary);
+    canvas_draw_str(canvas, 2, 11, "Bridge");
+    canvas_set_font(canvas, FontSecondary);
+    canvas_draw_str(canvas, 44, 11, "USB <-> UART");
+    canvas_draw_line(canvas, 0, 14, 128, 14);
+
+    char line[40];
+    snprintf(line, sizeof(line), "baud  %lu", (unsigned long)bridge_bauds[d->baud_idx]);
+    canvas_draw_str(canvas, 2, 27, line);
+    snprintf(
+        line, sizeof(line), "host>%lu  dev>%lu",
+        (unsigned long)d->br_tx, (unsigned long)d->br_rx);
+    canvas_draw_str(canvas, 2, 39, line);
+    canvas_draw_str(canvas, 2, 51, "pin 13 TX / 14 RX");
+    canvas_draw_line(canvas, 0, 53, 128, 53);
+    canvas_draw_str(canvas, 2, 62, "Up/Dn baud   Back exit");
 }
 
 static void draw_macros(Canvas* canvas, Duta* d) {
@@ -329,6 +367,8 @@ static void draw_callback(Canvas* canvas, void* ctx) {
     canvas_clear(canvas);
     if(d->view == ViewMacros)
         draw_macros(canvas, d);
+    else if(d->view == ViewBridge)
+        draw_bridge(canvas, d);
     else
         draw_status(canvas, d);
 }
@@ -344,6 +384,7 @@ int32_t duta_app(void* p) {
     memset(d, 0, sizeof(Duta));
     g_duta = d;
     d->baud = 115200;
+    d->baud_idx = 4; // bridge_bauds[4] == 115200
     d->running = true;
     d->usb_rx = furi_stream_buffer_alloc(DUTA_RING, 1);
     d->uart_rx = furi_stream_buffer_alloc(DUTA_RING, 1);
@@ -407,12 +448,22 @@ int32_t duta_app(void* p) {
     uint8_t buf[64];
     uint32_t last_draw = 0;
     while(d->running) {
-        // host -> device (CMD frames + host DATA) over USB
-        size_t n = furi_stream_buffer_receive(d->usb_rx, buf, sizeof(buf), 0);
-        for(size_t i = 0; i < n; i++) skrit_dev_rx(&d->dev, buf[i]);
-        d->rx_bytes += n;
-        // target console -> host (tee'd onto the mux link)
-        skrit_dev_poll(&d->dev);
+        if(d->view == ViewBridge) {
+            // transparent passthrough: wire USB CDC <-> GPIO UART, raw bytes.
+            size_t n = furi_stream_buffer_receive(d->usb_rx, buf, sizeof(buf), 0);
+            if(n && d->serial) furi_hal_serial_tx(d->serial, buf, n);
+            d->br_tx += n; // host -> downstream
+            n = furi_stream_buffer_receive(d->uart_rx, buf, sizeof(buf), 0);
+            if(n) furi_hal_cdc_send(CDC_IF, buf, n);
+            d->br_rx += n; // downstream -> host
+        } else {
+            // host -> device (CMD frames + host DATA) over USB
+            size_t n = furi_stream_buffer_receive(d->usb_rx, buf, sizeof(buf), 0);
+            for(size_t i = 0; i < n; i++) skrit_dev_rx(&d->dev, buf[i]);
+            d->rx_bytes += n;
+            // target console -> host (tee'd onto the mux link)
+            skrit_dev_poll(&d->dev);
+        }
 
         InputEvent ev;
         if(furi_message_queue_get(d->input_q, &ev, 0) == FuriStatusOk) {
@@ -423,12 +474,18 @@ int32_t duta_app(void* p) {
                         duta_scan_macros(d);
                         d->macro_msg[0] = 0;
                         d->view = ViewMacros;
+                    } else if(ev.key == InputKeyRight) {
+                        // enter passthrough bridge mode
+                        d->br_rx = d->br_tx = 0;
+                        duta_bridge_set_baud(d, d->baud_idx);
+                        duta_led_apply(0, 0, 0x40); // blue: bridging
+                        d->view = ViewBridge;
                     } else if(ev.key == InputKeyBack) {
                         d->running = false;
                     } else {
                         redraw = false;
                     }
-                } else { // ViewMacros
+                } else if(d->view == ViewMacros) {
                     if(ev.key == InputKeyUp && d->macro_sel) {
                         d->macro_sel--;
                     } else if(ev.key == InputKeyDown && d->macro_sel + 1 < d->macro_count) {
@@ -438,6 +495,19 @@ int32_t duta_app(void* p) {
                         view_port_update(d->vp);
                         duta_run_macro(d, d->macro_name[d->macro_sel]);
                     } else if(ev.key == InputKeyBack) {
+                        d->view = ViewStatus;
+                    } else {
+                        redraw = false;
+                    }
+                } else { // ViewBridge
+                    if(ev.key == InputKeyUp && (size_t)(d->baud_idx + 1) < N_BAUD) {
+                        duta_bridge_set_baud(d, d->baud_idx + 1);
+                    } else if(ev.key == InputKeyDown && d->baud_idx) {
+                        duta_bridge_set_baud(d, d->baud_idx - 1);
+                    } else if(ev.key == InputKeyBack) {
+                        // leave bridge: restore the DATA baud and the node LED state
+                        duta_led_apply(d->rgb[0], d->rgb[1], d->rgb[2]);
+                        if(d->serial) furi_hal_serial_set_br(d->serial, d->baud);
                         d->view = ViewStatus;
                     } else {
                         redraw = false;
