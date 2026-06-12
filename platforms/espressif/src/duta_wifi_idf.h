@@ -21,6 +21,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
+#include "mdns.h" // _skrit._tcp advertisement (espressif/mdns managed component)
 #include "nvs.h"
 
 #include "skrit_device.h"
@@ -438,17 +439,50 @@ static void duta_wifi_init(const skrit_hal *base) {
 // Feed the WS session a DATA record / console bytes (called by the board's tee).
 static inline void duta_wifi_feed(const uint8_t *p, uint16_t n) { skrit_dev_feed_data(&ws_dev, p, n); }
 
+// ---- mDNS (_skrit._tcp) so hosts auto-discover the WS endpoint --------------
+static bool mdns_up;
+static void duta_mdns_start(void) {
+  if (mdns_up) return;
+  uint8_t mac[6] = {0};
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  char host[16];
+  snprintf(host, sizeof host, "duta-%02x%02x", mac[4], mac[5]); // duta-xxxx.local
+  if (mdns_init() != ESP_OK) return;
+  mdns_hostname_set(host);
+  mdns_service_add(NULL, "_skrit", "_tcp", SKRIT_WS_PORT, NULL, 0);
+  mdns_service_txt_item_set("_skrit", "_tcp", "name", BOARD_NAME);
+  mdns_service_txt_item_set("_skrit", "_tcp", "vendor", BOARD_VENDOR);
+  mdns_up = true;
+}
+static void duta_mdns_stop(void) {
+  if (!mdns_up) return;
+  mdns_free();
+  mdns_up = false;
+}
+
 static void duta_wifi_loop(void) {
   switch (wifi_state) {
   case SKRIT_WIFI_PORTAL:
     portal_pump();
     break;
   case SKRIT_WIFI_CONNECTING:
-    if (wifi_got_ip) wifi_state = SKRIT_WIFI_CONNECTED;
-    else if (wms() - wifi_join_t0 > 20000) { wifi_state = SKRIT_WIFI_FAILED; portal_start(); }
+    if (wifi_got_ip) {
+      wifi_state = SKRIT_WIFI_CONNECTED;
+      duta_mdns_start(); // advertise once we have an IP
+    } else if (wms() - wifi_join_t0 > 20000) {
+      wifi_state = SKRIT_WIFI_FAILED;
+      portal_start();
+    }
     break;
   case SKRIT_WIFI_CONNECTED:
-    if (!wifi_got_ip) { ws_drop_client(); if (ws_listen >= 0) { close(ws_listen); ws_listen = -1; } wifi_state = SKRIT_WIFI_CONNECTING; wifi_join_t0 = wms(); break; }
+    if (!wifi_got_ip) {
+      duta_mdns_stop();
+      ws_drop_client();
+      if (ws_listen >= 0) { close(ws_listen); ws_listen = -1; }
+      wifi_state = SKRIT_WIFI_CONNECTING;
+      wifi_join_t0 = wms();
+      break;
+    }
     ws_pump();
     break;
   default:
