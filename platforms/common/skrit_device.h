@@ -468,6 +468,7 @@ static const char *skrit__data_kind_name(uint8_t kind) {
   case SKRIT_DATA_BLE_SNIFF: return "BLE sniffer";
   case SKRIT_DATA_LOGIC: return "Logic";
   case SKRIT_DATA_I2C: return "I2C";
+  case SKRIT_DATA_IEEE802154: return "IEEE 802.15.4";
   default: return "UART";
   }
 }
