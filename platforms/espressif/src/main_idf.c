@@ -30,6 +30,10 @@
 #endif
 
 #include "board.h" // duta_outputs[] + role pins + BOARD_NAME + DUTA_RGB_* + mcu pins
+// Optional radio-sniffer DATA backend (e.g. -DDUTA_SNIFF_ESP154 for the C6/H2
+// 802.15.4 radio): binds duta_sniffer_*() + DUTA_SNIFFER / DUTA_SNIFF_KIND /
+// DUTA_SNIFF_HAS_TX|CHANNEL. When set, DATA is captured radio frames, not a UART.
+#include "duta_sniffer.h"
 
 // Runtime IO provisioning: the duta_io[] table can be re-provisioned from the app
 // and persisted in NVS. These store hooks must be defined before duta_io_arduino.h
@@ -97,7 +101,11 @@ static void hal_link_write(void *c, const uint8_t *p, uint16_t n) {
 }
 static void hal_data_write(void *c, const uint8_t *p, uint16_t n) {
   (void)c;
+#ifdef DUTA_SNIFF_HAS_TX
+  duta_sniffer_tx(p, n); // sniffer build: a host DATA write is a frame to inject
+#else
   uart_write_bytes(DATA_UART, p, n);
+#endif
 }
 static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
   (void)c;
@@ -109,10 +117,15 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
 static void hal_proto_get(void *c, uint8_t idx, uint32_t *value, uint8_t *o0, uint8_t *o1, uint8_t *o2) {
   (void)c;
   (void)idx;
+#ifdef DUTA_SNIFF_HAS_CHANNEL
+  *value = duta_sniffer_get_channel(); // ieee802154: value = channel (11..26)
+  *o0 = *o1 = *o2 = 0;
+#else
   *value = g_baud;
   *o0 = 8;
   *o1 = SKRIT_PAR_NONE;
   *o2 = 1;
+#endif
 }
 static void hal_proto_set(void *c, uint8_t idx, uint32_t value, uint8_t o0, uint8_t o1, uint8_t o2) {
   (void)c;
@@ -120,8 +133,12 @@ static void hal_proto_set(void *c, uint8_t idx, uint32_t value, uint8_t o0, uint
   (void)o0;
   (void)o1;
   (void)o2;
+#ifdef DUTA_SNIFF_HAS_CHANNEL
+  duta_sniffer_set_channel((uint8_t)value); // value carries the channel (0/out-of-range = hop)
+#else
   if (value) g_baud = value;
   data_uart_begin(); // re-apply (baud only for now; bits/parity/stop = 8N1)
+#endif
 }
 static void hal_serial_signal(void *c, uint8_t mask, uint8_t value) {
   (void)c;
@@ -232,7 +249,9 @@ static uint8_t hal_i2c_xfer(void *c, uint8_t addr, const uint8_t *w, uint8_t wle
 void app_main(void) {
   nvs_flash_init();
   duta_io_begin(); // load any provisioned table + configure GPIO/LEDC/RGB from it
-  data_uart_begin();
+#ifndef DUTA_SNIFFER
+  data_uart_begin(); // a sniffer build has no DATA UART — DATA is captured frames
+#endif
 #if DTR_PIN >= 0
   gpio_set_direction((gpio_num_t)DTR_PIN, GPIO_MODE_OUTPUT);
 #endif
@@ -275,20 +294,35 @@ void app_main(void) {
   HAL.i2c_scan = hal_i2c_scan; // I2C master (active when DATA kind = i2c)
   HAL.i2c_xfer = hal_i2c_xfer;
   skrit_dev_init(&g_dev, &HAL, NULL, /*muxed*/ 1);
+#ifdef DUTA_SNIFFER
+  HAL.data_kind = DUTA_SNIFF_KIND; // DATA = captured radio frames (DATA_DESC reports it)
+  g_data_kind = DUTA_SNIFF_KIND;
+  duta_sniffer_init();
+  duta_sniffer_start(); // always-on; the host gets records + can inject + set channel
+#else
   data_kind_apply(data_kind_load()); // restore the persisted bridged medium
   duta_wifi_init(&HAL);              // WS bridge: copies the HAL, joins / raises the portal
+#endif
 
-  uint8_t buf[64], db[64];
+  uint8_t buf[64], db[140]; // db also holds one ieee802154 record (up to ~136 bytes)
   for (;;) {
+#ifdef DUTA_SNIFFER
+    // Sniffer kind: pop captured radio frames; each is one DATA record on the mux.
+    uint16_t got;
+    while ((got = duta_sniffer_take(db, sizeof db)) != 0) skrit_dev_feed_data(&g_dev, db, got);
+#else
     // UART kind: read the target console ONCE and tee it to both links (USB + WS),
     // each with its own session/auth state. I2C kind: records come from I2C_XFER.
     if (g_data_kind == SKRIT_DATA_UART) {
       uint16_t got = hal_data_read(NULL, db, sizeof db);
       if (got) { skrit_dev_feed_data(&g_dev, db, got); duta_wifi_feed(db, got); }
     }
+#endif
     int n = usb_serial_jtag_read_bytes(buf, sizeof buf, 0);
     for (int i = 0; i < n; i++) skrit_dev_rx(&g_dev, buf[i]); // CMD + host DATA in over USB
+#ifndef DUTA_SNIFFER
     duta_wifi_loop();                                         // WiFi state machine + WS pump
+#endif
     vTaskDelay(1);
   }
 }

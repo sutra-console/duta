@@ -72,7 +72,13 @@ The ROM downloader is in silicon, so the board is unbrickable.
 - **DATA console:** UART0 on GPIO16/17 → the board's UART-bridge USB port.
 - **Default output:** the onboard WS2812 (GPIO8) as the RGB output.
 - **Build:** `pio run -d platforms/espressif -e esp32c6` (pure-IDF).
-- The 802.15.4 radio makes this a natural Zigbee/Thread node for the network-model work.
+- **802.15.4 sniffer+injector:** `pio run -e esp32c6_sniff154` builds the "dumb
+  radio" variant — DATA becomes captured 802.15.4 frames (`DATA_DESC = ieee802154`),
+  a host DATA write injects a raw MAC frame, and `PROTO` value sets the channel
+  (11-26, 0 = auto-hop). Same record + injection contract as the nRF52840 backend
+  (`duta_154_sniff_esp.c` ↔ `zephyr/duta_154_sniff.c`); all the Zigbee/Thread
+  intelligence is host-side (Sutra). This is the natural Zigbee node for the
+  network-model work.
 
 ## Links
 
