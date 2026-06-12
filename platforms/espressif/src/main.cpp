@@ -14,6 +14,10 @@
 //
 // IO is table-driven (board.h `duta_outputs[]` + duta_io_arduino.h); this file
 // is just the transport, serial, and reboot HAL plus the two-line main loop.
+//
+// The pure-IDF build (-DDUTA_PURE_IDF) uses main_idf.c instead; compile this
+// Arduino entry out entirely there.
+#ifndef DUTA_PURE_IDF
 #include <Arduino.h>
 
 #include "board.h"            // declares the duta_outputs[] table + mcu/board maps
@@ -402,3 +406,5 @@ void loop() {
   duta_wifi_loop(); // WiFi state machine + WS server pump
 }
 #endif // DUTA_SNIFFER
+
+#endif // !DUTA_PURE_IDF
