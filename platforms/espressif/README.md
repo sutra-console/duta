@@ -25,6 +25,12 @@ bootloader: **hold BOOT while plugging in USB** (the ROM downloader enumerates),
 **Classic ESP32 DevKit:** the onboard CP2102 + auto-reset circuit handle bootloader
 entry; plain `-t upload` always works.
 
+**Custom UF2 bootloader** ([`bootloader/`](bootloader/)): optional [TinyUF2](https://github.com/adafruit/tinyuf2)
+overlay that adds a Duta-branded UF2 drag-drop drive (volume label `DUTA`) entered
+by command — the ESP-IDF analog of the [nRF UF2 bootloader](../zephyr/bootloader/).
+The ESP32 ROM downloader already gives command-driven flashing (above); TinyUF2
+adds the custom identity + drive. The ROM downloader is an unbrickable recovery net.
+
 ## Board layout: `mcu/ → boards/<vendor>/ → targets/`
 
 Board support follows [BOARDS.md](../../BOARDS.md): [`src/mcu/`](src/mcu) holds the
