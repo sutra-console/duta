@@ -45,6 +45,10 @@ extern "C" {
 #ifndef SKRIT_SCRATCH_CAP
 #define SKRIT_SCRATCH_CAP 512
 #endif
+// Max args the core reads from an INVOKE_DESC entry into one descriptor frame.
+#ifndef SKRIT_INVOKE_ARGS_MAX
+#define SKRIT_INVOKE_ARGS_MAX 16
+#endif
 // Largest console burst wrapped into one mux DATA frame (keep COBS overhead 1B).
 #ifndef SKRIT_MUX_CHUNK
 #define SKRIT_MUX_CHUNK 240
@@ -171,6 +175,21 @@ typedef struct skrit_hal {
   uint8_t (*i2c_scan)(void *ctx, uint8_t bitmap[16]);
   uint8_t (*i2c_xfer)(void *ctx, uint8_t addr, const uint8_t *w, uint8_t wlen,
                       uint8_t *r, uint8_t rlen);
+
+  // ---- INVOKE: user-defined commands (NULL = unsupported; cmd_desc != NULL
+  // advertises SKRIT_FLAG_INVOKE and enables INVOKE_DESC/INVOKE). The device
+  // owns its command vocabulary; the core just relays. ----
+  //   cmd_desc:   the command menu. Returns `total` commands; when index < total,
+  //               fills *id, the arg signature (*nargs entries into argtype[],
+  //               which holds at least SKRIT_INVOKE_ARGS_MAX), *flags
+  //               (SKRIT_INVOKE_*), and *name. Mirrors pin_caps/config_get.
+  //   cmd_invoke: run command `id` with `payload` (plen bytes). Write up to `cap`
+  //               reply bytes into `reply` and set *rlen to the count (0 if none).
+  //               Returns SKRIT_ST_* (NOTFOUND = unknown id).
+  uint8_t (*cmd_desc)(void *ctx, uint8_t index, uint16_t *id, uint8_t *nargs,
+                      uint8_t *argtype, uint8_t *flags, const char **name);
+  uint8_t (*cmd_invoke)(void *ctx, uint16_t id, const uint8_t *payload, uint8_t plen,
+                        uint8_t *reply, uint8_t cap, uint8_t *rlen);
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -381,6 +400,19 @@ static uint8_t skrit__run_program(skrit_dev *d, const uint8_t *prog, uint16_t le
         d->hal->rgb_set(d->ctx, idx, SKRIT_RGB_ALL, rr, gg, bb); // fill the strip
       break; // no RGB output -> silently no-op
     }
+    case SKRIT_MC_INVOKE: {
+      if ((uint16_t)(pc + 3) > len) return SKRIT_ST_BADARGS;
+      uint16_t id = (uint16_t)(prog[pc] | (prog[pc + 1] << 8));
+      uint8_t n = prog[pc + 2];
+      pc += 3;
+      if ((uint16_t)(pc + n) > len) return SKRIT_ST_BADARGS;
+      if (d->hal->cmd_invoke) { // ignore any reply in macro context
+        uint8_t rl = 0;
+        d->hal->cmd_invoke(d->ctx, id, prog + pc, n, NULL, 0, &rl);
+      }
+      pc += n;
+      break; // unknown id / no handler -> silent no-op, like SETOUT on an unwired pin
+    }
     case SKRIT_MC_EXPECT: {
       if (tier < SKRIT_TIER_INTERACTIVE) return SKRIT_ST_UNSUPPORTED;
       if ((uint16_t)(pc + 3) > len) return SKRIT_ST_BADARGS;
@@ -475,7 +507,8 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     body[bl++] = h->macro_tier;
     body[bl++] = (h->auth_required ? SKRIT_FLAG_AUTH_REQUIRED : 0) |
                  ((h->auth_is_default && h->auth_is_default(d->ctx)) ? SKRIT_FLAG_DEFAULT_CRED : 0) |
-                 (h->pin_caps ? SKRIT_FLAG_PROVISION : 0);
+                 (h->pin_caps ? SKRIT_FLAG_PROVISION : 0) |
+                 (h->cmd_desc ? SKRIT_FLAG_INVOKE : 0);
     skrit__respond(d, SKRIT_INFO | SKRIT_RESP, seq, body, bl);
     break;
   case SKRIT_AUTH:
@@ -835,6 +868,45 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     if (body[0] != SKRIT_ST_OK) { skrit__status(d, type, seq, body[0]); break; }
     body[1] = b[0];
     skrit__respond(d, type | SKRIT_RESP, seq, body, (uint8_t)(2 + rlen));
+    break;
+  }
+
+  case SKRIT_INVOKE_DESC: {
+    // index(1) -> status, index, total[, id(2), nargs, argtype×nargs, flags, name]
+    if (!h->cmd_desc) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    uint16_t id = 0; uint8_t nargs = 0, flags = 0; const char *nm = 0;
+    uint8_t argtype[SKRIT_INVOKE_ARGS_MAX];
+    uint8_t total = h->cmd_desc(d->ctx, b[0], &id, &nargs, argtype, &flags, &nm);
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = b[0];
+    body[bl++] = total;
+    if (b[0] < total) {
+      if (nargs > SKRIT_INVOKE_ARGS_MAX) nargs = SKRIT_INVOKE_ARGS_MAX;
+      body[bl++] = (uint8_t)(id & 0xFF);
+      body[bl++] = (uint8_t)(id >> 8);
+      body[bl++] = nargs;
+      for (uint8_t i = 0; i < nargs && bl < SKRIT_MAX_BODY; i++) body[bl++] = argtype[i];
+      body[bl++] = flags;
+      if (nm) while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+    }
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
+  case SKRIT_INVOKE: {
+    // id(2 LE), payload... -> status, id(2)[, reply...]. The HAL routes id.
+    if (!h->cmd_invoke) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 2) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    uint16_t id = (uint16_t)(b[0] | (b[1] << 8));
+    uint8_t rlen = 0;
+    uint8_t st = h->cmd_invoke(d->ctx, id, b + 2, (uint8_t)(len - 2),
+                               body + 3, (uint8_t)(SKRIT_MAX_BODY - 3), &rlen);
+    if (st != SKRIT_ST_OK) { skrit__status(d, type, seq, st); break; }
+    if ((uint16_t)(3 + rlen) > SKRIT_MAX_BODY) rlen = SKRIT_MAX_BODY - 3;
+    body[0] = SKRIT_ST_OK;
+    body[1] = (uint8_t)(id & 0xFF);
+    body[2] = (uint8_t)(id >> 8);
+    skrit__respond(d, type | SKRIT_RESP, seq, body, (uint8_t)(3 + rlen));
     break;
   }
 

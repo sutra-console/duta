@@ -79,6 +79,25 @@ static uint8_t m_cfgset(void*c,const uint8_t*body,uint8_t len,uint8_t*bad){
     if(pin!=4&&pin!=48){*bad=k;return SKRIT_ST_BADARGS;} p+=7+p[6]; }
   prov_set_called=1; return SKRIT_ST_OK;}
 
+// mock INVOKE: a well-known send_touch(x:u16,y:u16) + a vendor echo(bytes)->reply
+static uint16_t inv_x, inv_y; static uint8_t inv_called;
+static uint8_t m_cmddesc(void*c,uint8_t i,uint16_t*id,uint8_t*na,uint8_t*at,uint8_t*fl,const char**nm){
+  (void)c;
+  if(i==0){*id=SKRIT_INVOKE_TOUCH;*na=2;at[0]=SKRIT_ARG_U16;at[1]=SKRIT_ARG_U16;*fl=0;*nm="send_touch";}
+  else if(i==1){*id=SKRIT_INVOKE_VENDOR_BASE+1;*na=1;at[0]=SKRIT_ARG_BYTES;*fl=SKRIT_INVOKE_REPLY;*nm="echo";}
+  return 2;}
+static uint8_t m_cmdinvoke(void*c,uint16_t id,const uint8_t*p,uint8_t pl,uint8_t*rep,uint8_t cap,uint8_t*rl){
+  (void)c; *rl=0;
+  if(id==SKRIT_INVOKE_TOUCH){ if(pl<4)return SKRIT_ST_BADARGS;
+    inv_x=(uint16_t)(p[0]|(p[1]<<8)); inv_y=(uint16_t)(p[2]|(p[3]<<8)); inv_called=1; return SKRIT_ST_OK; }
+  if(id==SKRIT_INVOKE_VENDOR_BASE+1){ // echo: payload = len(1),bytes -> reply those bytes
+    if(pl<1)return SKRIT_ST_BADARGS;
+    uint8_t n=p[0];
+    if((uint16_t)n+1>pl)return SKRIT_ST_BADARGS;
+    if(n>cap)n=cap;
+    memcpy(rep,p+1,n); *rl=n; return SKRIT_ST_OK; }
+  return SKRIT_ST_NOTFOUND;}
+
 static skrit_hal hal = {0};
 static skrit_dev dev;
 
@@ -389,6 +408,50 @@ int main(void){
       assert(r[3] == SKRIT_ST_BADARGS); }
   }
   printf("I2C scan/xfer ok\n");
+
+  // ---- INVOKE: user-defined commands (desc + call + reply + macro op) ----
+  {
+    // no callbacks -> UNSUPPORTED
+    skrit_dev bare; skrit_dev_init(&bare, &hal, NULL, 1);
+    { uint8_t a[1] = {0}; link_n = 0; feed_cmd(&bare, SKRIT_INVOKE_DESC, 1, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_UNSUPPORTED); }
+
+    skrit_hal vhal = hal; vhal.cmd_desc = m_cmddesc; vhal.cmd_invoke = m_cmdinvoke;
+    skrit_dev vdev; skrit_dev_init(&vdev, &vhal, NULL, 1);
+    // INFO advertises FLAG_INVOKE (flags = body[9] = r[12])
+    link_n = 0; feed_cmd(&vdev, SKRIT_INFO, 2, NULL, 0, 1); last_resp(r, 1);
+    assert(r[3] == SKRIT_ST_OK && (r[12] & SKRIT_FLAG_INVOKE));
+    // INVOKE_DESC[0] = send_touch(u16,u16), no reply
+    { uint8_t a[1] = {0}; link_n = 0; feed_cmd(&vdev, SKRIT_INVOKE_DESC, 3, a, 1, 1); last_resp(r, 1);
+      // r: TYPE,SEQ,LEN, ST,index,total, id_lo,id_hi, nargs, at0,at1, flags, name...
+      assert(r[3] == SKRIT_ST_OK && r[4] == 0 && r[5] == 2);
+      assert(r[6] == (SKRIT_INVOKE_TOUCH & 0xFF) && r[7] == (SKRIT_INVOKE_TOUCH >> 8));
+      assert(r[8] == 2 && r[9] == SKRIT_ARG_U16 && r[10] == SKRIT_ARG_U16 && r[11] == 0); }
+    // INVOKE_DESC[1] = vendor echo (0x8001), REPLY flag, one bytes arg
+    { uint8_t a[1] = {1}; link_n = 0; feed_cmd(&vdev, SKRIT_INVOKE_DESC, 4, a, 1, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[6] == 0x01 && r[7] == 0x80);
+      assert(r[8] == 1 && r[9] == SKRIT_ARG_BYTES && r[10] == SKRIT_INVOKE_REPLY); }
+    // INVOKE send_touch(100,200): id(2 LE) + x(2) + y(2)
+    { uint8_t x[] = {SKRIT_INVOKE_TOUCH & 0xFF, SKRIT_INVOKE_TOUCH >> 8, 100, 0, 200, 0};
+      inv_called = 0; link_n = 0; feed_cmd(&vdev, SKRIT_INVOKE, 5, x, (uint8_t)sizeof x, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[4] == (SKRIT_INVOKE_TOUCH & 0xFF) && r[5] == (SKRIT_INVOKE_TOUCH >> 8));
+      assert(inv_called && inv_x == 100 && inv_y == 200); }
+    // INVOKE vendor echo -> status, id(2), reply bytes "abc"
+    { uint16_t id = SKRIT_INVOKE_VENDOR_BASE + 1;
+      uint8_t x[] = {(uint8_t)(id & 0xFF), (uint8_t)(id >> 8), 3, 'a', 'b', 'c'};
+      link_n = 0; feed_cmd(&vdev, SKRIT_INVOKE, 6, x, (uint8_t)sizeof x, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_OK && r[6] == 'a' && r[7] == 'b' && r[8] == 'c'); }
+    // unknown id -> NOTFOUND
+    { uint8_t x[] = {0x99, 0x99}; link_n = 0; feed_cmd(&vdev, SKRIT_INVOKE, 7, x, 2, 1); last_resp(r, 1);
+      assert(r[3] == SKRIT_ST_NOTFOUND); }
+    // the skrit-mc INVOKE opcode drives the same handler
+    { inv_called = 0;
+      uint8_t prog[] = {SKRIT_MC_VER, SKRIT_MC_INVOKE,
+                        SKRIT_INVOKE_TOUCH & 0xFF, SKRIT_INVOKE_TOUCH >> 8, 4, 7, 0, 9, 0, SKRIT_MC_END};
+      uint8_t st = skrit__run_program(&vdev, prog, (uint16_t)sizeof prog);
+      assert(st == SKRIT_ST_OK && inv_called && inv_x == 7 && inv_y == 9); }
+  }
+  printf("INVOKE desc/call/reply/macro ok\n");
 
   // ---- skrit_dev_feed_data: one read tees to several links ----
   {
