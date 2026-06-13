@@ -88,6 +88,18 @@ static uint8_t g_bits = 8, g_parity = SKRIT_PAR_NONE, g_stop = 1;
 
 static skrit_dev dev;
 
+// ---- event-driven IO serialization ----------------------------------------
+// The portable core (skrit_device.h) is a single-threaded synchronous state
+// machine — it must keep running on host/CH55x with no RTOS. So we keep the
+// core synchronous and only the platform IO glue goes async (the same split the
+// ESP IDF build uses): each IO source runs in its own thread blocked on its own
+// source, and every skrit_dev_rx / skrit_dev_feed_data / skrit_dev_poll call is
+// serialized behind one mutex. The GATT callbacks (BT RX thread), the CMD UART
+// consumer, and the sniffer consumer all take this lock.
+static K_MUTEX_DEFINE(dev_mtx);
+#define DEV_LOCK() k_mutex_lock(&dev_mtx, K_FOREVER)
+#define DEV_UNLOCK() k_mutex_unlock(&dev_mtx)
+
 // ===========================================================================
 // Transport: BLE (GATT) when CONFIG_BT, else USB CDC ACM
 // ===========================================================================
@@ -143,7 +155,9 @@ static ssize_t cmd_rx(struct bt_conn *conn, const struct bt_gatt_attr *attr, con
   ARG_UNUSED(offset);
   ARG_UNUSED(flags);
   const uint8_t *p = buf;
+  DEV_LOCK(); // runs on the BT RX thread — serialize against the poll/sniffer threads
   for (uint16_t i = 0; i < len; i++) skrit_dev_rx(&dev, p[i]);
+  DEV_UNLOCK();
   return len;
 }
 
@@ -590,6 +604,81 @@ static const skrit_hal HAL = {
     .cmd_invoke = hal_cmd_invoke,
 };
 
+// ===========================================================================
+// Event-driven IO threads
+// ---------------------------------------------------------------------------
+// Each transport/source runs off the super-loop now. Threads are created with
+// K_THREAD_DEFINE (spawned at boot) but each parks on a sem/semaphore-equivalent
+// until main() arms it for the active build, so an unused path costs only its
+// (small) stack. native_sim has no transport and runs none of them.
+// ===========================================================================
+#if !defined(CONFIG_BT) && HAVE_USB
+// ---- CMD UART RX: interrupt-driven, no busy-poll ----------------------------
+// The USB CDC ACM that carries the mux link is fed by its UART IRQ (cdc-acm
+// needs CONFIG_UART_INTERRUPT_DRIVEN, which the board .conf files already set).
+// The ISR drains the FIFO into a ring buffer; a consumer thread blocks on a sem
+// the ISR gives, then feeds the core under the mutex — replacing the old
+// `while (uart_poll_in(...))` spin in main()'s loop.
+#include <zephyr/sys/ring_buffer.h>
+RING_BUF_DECLARE(cmd_rx_rb, 512);
+static K_SEM_DEFINE(cmd_rx_sem, 0, 1);
+
+static void cmd_uart_isr(const struct device *uart, void *user) {
+  ARG_UNUSED(user);
+  if (!uart_irq_update(uart)) return;
+  uint8_t buf[64];
+  bool got = false;
+  while (uart_irq_rx_ready(uart)) {
+    int n = uart_fifo_read(uart, buf, sizeof buf);
+    if (n <= 0) break;
+    ring_buf_put(&cmd_rx_rb, buf, (uint32_t)n); // bounded; overrun drops tail, never corrupts head
+    got = true;
+  }
+  if (got) k_sem_give(&cmd_rx_sem);
+}
+
+static void cmd_rx_thread(void *a, void *b, void *c) {
+  ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+  uint8_t buf[64];
+  for (;;) {
+    k_sem_take(&cmd_rx_sem, K_FOREVER); // woken by the UART ISR — no polling
+    uint32_t n;
+    while ((n = ring_buf_get(&cmd_rx_rb, buf, sizeof buf)) != 0) {
+      DEV_LOCK();
+      for (uint32_t i = 0; i < n; i++) skrit_dev_rx(&dev, buf[i]);
+      DEV_UNLOCK();
+    }
+  }
+}
+K_THREAD_DEFINE(cmd_rx_tid, 1024, cmd_rx_thread, NULL, NULL, NULL, 6, 0, 0);
+#endif // !CONFIG_BT && HAVE_USB
+
+#ifdef DUTA_SNIFFER
+// ---- sniffer consumer thread ------------------------------------------------
+// Drains captured frames into the core. Woken by duta_sniffer_notify() (the
+// event hook the radio backend calls when it queues a frame) OR a 100 ms tick
+// (the timeout still drives take()'s channel hop on a quiet channel, and — for
+// the nRF raw-register backend, which has no RX-done IRQ yet — it IS the drain
+// cadence). Off the super-loop either way; see the report for the tradeoff.
+static K_SEM_DEFINE(sniff_sem, 0, 1);
+void duta_sniffer_notify(void) { k_sem_give(&sniff_sem); }
+
+static void sniff_thread(void *a, void *b, void *c) {
+  ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
+  static uint8_t rec[160]; // 802.15.4: 9 + up-to-127-byte PSDU
+  for (;;) {
+    k_sem_take(&sniff_sem, K_MSEC(100));
+    uint16_t n;
+    while ((n = duta_sniffer_take(rec, sizeof rec)) != 0) {
+      DEV_LOCK();
+      skrit_dev_feed_data(&dev, rec, n);
+      DEV_UNLOCK();
+    }
+  }
+}
+K_THREAD_DEFINE(sniff_tid, 1024, sniff_thread, NULL, NULL, NULL, 6, 0, 0);
+#endif // DUTA_SNIFFER
+
 int main(void) {
   for (int i = 0; i < DUTA_N_GPIO_OUT; i++)
     if (device_is_ready(out_gpio[i].port)) gpio_pin_configure_dt(&out_gpio[i], GPIO_OUTPUT_INACTIVE);
@@ -603,11 +692,15 @@ int main(void) {
   transport_start();
 
 #if defined(CONFIG_BT)
-  // BLE: received bytes arrive via the GATT write callbacks (data_rx/cmd_rx); the
-  // loop tees the target console out (queued into the TX rings) and drains those
-  // rings to the radio, retrying when the controller's buffers free up.
+  // BLE: CMD/DATA bytes arrive via the GATT write callbacks (data_rx/cmd_rx, on
+  // the BT RX thread, now serialized under DEV_LOCK). This loop owns the two
+  // output sides — tee the target console out (skrit_dev_poll), then drain the
+  // TX rings to the radio, retrying when the controller's buffers free up. The
+  // controller event queue paces it; the brief sleep keeps it off a hot spin.
   for (;;) {
+    DEV_LOCK();
     skrit_dev_poll(&dev);
+    DEV_UNLOCK();
     ble_tx_drain();
     k_msleep(1);
   }
@@ -617,26 +710,29 @@ int main(void) {
     printk("Duta zephyr build-check (no transport). PING=0x%02x\n", SKRIT_PING);
     return 0;
   }
+  // CMD RX is now interrupt-driven (cmd_uart_isr -> ring -> cmd_rx_thread): no
+  // more uart_poll_in spin in this loop. Arm the ISR for the mux-link CDC port.
+#if HAVE_USB
+  uart_irq_callback_user_data_set(cmd_dev, cmd_uart_isr, NULL);
+  uart_irq_rx_enable(cmd_dev);
+#endif
 #ifdef DUTA_SNIFFER
-  // Sniffer build: DATA is captured radio frames (no UART). Poll the radio and
-  // emit each frame as a DATA record; CMD still works over the same mux link.
-  // The "Sniffing" virtual output (SNIFF_OUT_IDX) starts/stops capture; default on.
-  // rec must hold the largest record: 802.15.4 is 9 + up-to-127-byte PSDU.
+  // Sniffer build: DATA is captured radio frames (no UART) — the sniff_thread
+  // drains them into the core (woken by duta_sniffer_notify() or its 100 ms
+  // tick). CMD rides the interrupt-fed cmd_rx_thread. The "Sniffing" virtual
+  // output (SNIFF_OUT_IDX) starts/stops capture; default on. Nothing left for
+  // main() to pump, so it sleeps.
   duta_sniffer_init();
   duta_sniffer_start();
-  static uint8_t rec[160]; // static: keep the 802.15.4-sized record off the stack
-  for (;;) {
-    uint16_t n;
-    while ((n = duta_sniffer_take(rec, sizeof rec)) != 0) skrit_dev_feed_data(&dev, rec, n);
-    unsigned char b;
-    while (uart_poll_in(cmd_dev, &b) == 0) skrit_dev_rx(&dev, (uint8_t)b);
-    k_yield();
-  }
+  for (;;) k_sleep(K_FOREVER);
 #else
+  // USB CDC bridge: CMD RX is interrupt-driven; this loop only tees the target
+  // DATA console out to the host (skrit_dev_poll reads the DATA UART by poll —
+  // a separate transport from the mux link, left as a short poll for now).
   for (;;) {
-    skrit_dev_poll(&dev); // tee target console -> host
-    unsigned char b;
-    while (uart_poll_in(cmd_dev, &b) == 0) skrit_dev_rx(&dev, (uint8_t)b);
+    DEV_LOCK();
+    skrit_dev_poll(&dev);
+    DEV_UNLOCK();
     k_msleep(1);
   }
 #endif

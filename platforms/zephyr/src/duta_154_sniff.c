@@ -25,6 +25,16 @@
 
 #include "duta_154_sniff.h"
 
+// Implemented by the platform main: wakes the frame-consumer thread (event-driven
+// instead of polling take()). Weak no-op default — matches the ESP backend's
+// contract (duta_154_sniff_esp.c). This raw-register backend detects RX by polling
+// EVENTS_END in take(), so it has no RX-complete callback to fire the hook from;
+// it stays a default no-op here and the consumer thread's sem timeout drives the
+// drain + channel hop. Wiring the RADIO END IRQ to call this is the future step
+// (see NRF_ASYNC_REPORT.md) — left untouched because it can't be verified without
+// hardware and a mis-armed radio IRQ would silently break capture.
+__attribute__((weak)) void duta_sniffer_notify(void) {}
+
 #define CH_MIN 11
 #define CH_MAX 26
 #define N_CHAN (CH_MAX - CH_MIN + 1)
