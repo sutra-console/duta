@@ -21,6 +21,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 // RTC_CNTL register block (download-boot poke below) only exists on the S3/C3
@@ -75,6 +76,12 @@ static void duta_io_store_clear(void) {
 #define DATA_UART UART_NUM_1
 
 static skrit_dev g_dev;
+static SemaphoreHandle_t g_dev_mtx;   // serializes all access to the single-threaded core
+#ifdef DUTA_SNIFFER
+static SemaphoreHandle_t g_sniff_sem; // receive_done -> sniff_task wakeup
+#endif
+#define DEV_LOCK() xSemaphoreTake(g_dev_mtx, portMAX_DELAY)
+#define DEV_UNLOCK() xSemaphoreGive(g_dev_mtx)
 static uint32_t g_baud = 115200;
 static uint8_t g_data_kind = SKRIT_DATA_UART; // UART console (default) or I2C master
 static skrit_hal HAL;                         // filled in app_main; referenced by data_kind_apply
@@ -246,6 +253,65 @@ static uint8_t hal_i2c_xfer(void *c, uint8_t addr, const uint8_t *w, uint8_t wle
   return st;
 }
 
+// ---- IO tasks: each blocks on its own source, serialized into the core -------
+// USB transport in: CMD frames + host DATA writes. Blocks on the USB read (no
+// polling); feeds the core under the mutex.
+static void usb_rx_task(void *arg) {
+  (void)arg;
+  uint8_t buf[64];
+  for (;;) {
+    int n = usb_serial_jtag_read_bytes(buf, sizeof buf, portMAX_DELAY);
+    if (n > 0) {
+      DEV_LOCK();
+      for (int i = 0; i < n; i++) skrit_dev_rx(&g_dev, buf[i]);
+      DEV_UNLOCK();
+    }
+  }
+}
+
+#ifdef DUTA_SNIFFER
+// Called by the radio backend's receive_done when a frame is queued — wakes the
+// consumer task instead of polling. Safe from the 802.15.4 driver task.
+void duta_sniffer_notify(void) {
+  if (g_sniff_sem) xSemaphoreGive(g_sniff_sem);
+}
+// Drains captured frames into the core. Woken by a frame OR a 100 ms tick (so the
+// channel hop in take() still fires on a quiet channel when auto-hopping).
+static void sniff_task(void *arg) {
+  (void)arg;
+  uint8_t db[140]; // one ieee802154 record (up to ~136 bytes)
+  for (;;) {
+    xSemaphoreTake(g_sniff_sem, pdMS_TO_TICKS(100));
+    uint16_t got;
+    while ((got = duta_sniffer_take(db, sizeof db)) != 0) { // ring is SPSC-safe sans mutex
+      DEV_LOCK();
+      skrit_dev_feed_data(&g_dev, db, got);
+      DEV_UNLOCK();
+    }
+  }
+}
+#else
+// UART bridge + WiFi pump. The UART read is a short blocking read (not the full
+// driver event queue yet); duta_wifi_loop is the WS/captive-portal state pump.
+static void bridge_task(void *arg) {
+  (void)arg;
+  uint8_t db[140];
+  for (;;) {
+    if (g_data_kind == SKRIT_DATA_UART) {
+      uint16_t got = hal_data_read(NULL, db, sizeof db);
+      if (got) {
+        DEV_LOCK();
+        skrit_dev_feed_data(&g_dev, db, got);
+        duta_wifi_feed(db, got);
+        DEV_UNLOCK();
+      }
+    }
+    duta_wifi_loop();
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+}
+#endif
+
 void app_main(void) {
   nvs_flash_init();
   duta_io_begin(); // load any provisioned table + configure GPIO/LEDC/RGB from it
@@ -294,37 +360,21 @@ void app_main(void) {
   HAL.i2c_scan = hal_i2c_scan; // I2C master (active when DATA kind = i2c)
   HAL.i2c_xfer = hal_i2c_xfer;
   skrit_dev_init(&g_dev, &HAL, NULL, /*muxed*/ 1);
+  g_dev_mtx = xSemaphoreCreateMutex(); // the portable core is single-threaded; serialize it
 #ifdef DUTA_SNIFFER
   HAL.data_kind = DUTA_SNIFF_KIND; // DATA = captured radio frames (DATA_DESC reports it)
   g_data_kind = DUTA_SNIFF_KIND;
+  g_sniff_sem = xSemaphoreCreateBinary(); // receive_done gives it; sniff_task drains
   duta_sniffer_init();
   duta_sniffer_start(); // always-on; the host gets records + can inject + set channel
+  xTaskCreate(sniff_task, "sniff", 4096, NULL, 6, NULL);
 #else
   data_kind_apply(data_kind_load()); // restore the persisted bridged medium
   duta_wifi_init(&HAL);              // WS bridge: copies the HAL, joins / raises the portal
+  xTaskCreate(bridge_task, "bridge", 6144, NULL, 5, NULL);
 #endif
-
-  uint8_t buf[64], db[140]; // db also holds one ieee802154 record (up to ~136 bytes)
-  for (;;) {
-#ifdef DUTA_SNIFFER
-    // Sniffer kind: pop captured radio frames; each is one DATA record on the mux.
-    uint16_t got;
-    while ((got = duta_sniffer_take(db, sizeof db)) != 0) skrit_dev_feed_data(&g_dev, db, got);
-#else
-    // UART kind: read the target console ONCE and tee it to both links (USB + WS),
-    // each with its own session/auth state. I2C kind: records come from I2C_XFER.
-    if (g_data_kind == SKRIT_DATA_UART) {
-      uint16_t got = hal_data_read(NULL, db, sizeof db);
-      if (got) { skrit_dev_feed_data(&g_dev, db, got); duta_wifi_feed(db, got); }
-    }
-#endif
-    int n = usb_serial_jtag_read_bytes(buf, sizeof buf, 0);
-    for (int i = 0; i < n; i++) skrit_dev_rx(&g_dev, buf[i]); // CMD + host DATA in over USB
-#ifndef DUTA_SNIFFER
-    duta_wifi_loop();                                         // WiFi state machine + WS pump
-#endif
-    vTaskDelay(1);
-  }
+  xTaskCreate(usb_rx_task, "usbrx", 4096, NULL, 6, NULL);
+  vTaskDelete(NULL); // setup done — all IO now lives in the tasks above
 }
 
 #endif // DUTA_PURE_IDF

@@ -23,6 +23,10 @@
 #include "esp_ieee802154.h"
 #include "esp_timer.h"
 
+// Implemented by the platform main: wakes the frame-consumer task (event-driven
+// instead of polling take()). Weak no-op default for builds that poll.
+__attribute__((weak)) void duta_sniffer_notify(void) {}
+
 #define CH_MIN 11
 #define CH_MAX 26
 #define DWELL_MS 400 // hop away from a quiet channel after this long
@@ -62,6 +66,7 @@ void esp_ieee802154_receive_done(uint8_t *frame, esp_ieee802154_frame_info_t *in
       s->fcs_ok = 1; // the driver delivers only FCS-valid frames here
       memcpy((void *)s->psdu, frame + 1, len);
       r_head = nh;
+      duta_sniffer_notify(); // wake the consumer task (event-driven drain)
     }
   }
   // CRITICAL: hand the RX buffer back to the driver so it keeps receiving. Skip
