@@ -214,15 +214,20 @@ static int16_t hal_cfg_get(void *c, uint8_t key, uint8_t *out, uint8_t cap) {
     out[3] = (uint8_t)(rx >> 8);
     return 4;
   }
+#ifndef DUTA_SNIFFER
+  // A sniffer's medium is the radio — fixed, not a UART/I2C the host can switch.
+  // Don't advertise DATA_KIND there (host then hides the medium selector).
   if (key == SKRIT_CFG_DATA_KIND) {
     if (cap < 1) return -1;
     out[0] = g_data_kind;
     return 1;
   }
+#endif
   return duta_wifi_cfg_get(key, out, cap); // WIFI_SSID/PASS/STATUS
 }
 static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len) {
   (void)c;
+#ifndef DUTA_SNIFFER
   if (key == SKRIT_CFG_DATA_KIND) {
     if (len != 1) return SKRIT_ST_BADARGS;
     if (val[0] != SKRIT_DATA_UART && val[0] != SKRIT_DATA_I2C) return SKRIT_ST_BADARGS;
@@ -230,6 +235,7 @@ static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len
     data_kind_save(val[0]);
     return SKRIT_ST_OK;
   }
+#endif
   return duta_wifi_cfg_set(key, val, len); // WIFI_SSID/PASS
 }
 
