@@ -18,10 +18,10 @@
 #define RGB_COUNT 1
 #define DTR_PIN (-1)
 #define RTS_PIN (-1)
-// I²C master DATA bridge: our wiring puts SDA/SCL on the side-header GP1/GP2
-// (both broken out, not fixed). Overrides duta_i2c.h's GP8/9 default.
-#define I2C_SDA_PIN 1
-#define I2C_SCL_PIN 2
+// I²C master DATA bridge: our wiring puts SCL on GP1 and SDA on GP2 (both
+// broken out on the side header, not fixed). Overrides duta_i2c.h's GP8/9 default.
+#define I2C_SCL_PIN 1
+#define I2C_SDA_PIN 2
 
 #include "duta_board_io.h"
 
