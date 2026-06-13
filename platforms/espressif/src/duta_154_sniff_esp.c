@@ -112,8 +112,22 @@ void duta_154_sniff_esp_tx(const uint8_t *mac, uint16_t maclen) {
   if (maclen == 0 || maclen > 125) return; // +2 FCS must fit a 127-byte PSDU
   tx_buf[0] = (uint8_t)(maclen + 2);       // PHR counts the FCS; the radio appends it
   memcpy(tx_buf + 1, mac, maclen);
+  // transmit() is ASYNC — it queues the frame and returns immediately; the PHY
+  // sends it later and fires esp_ieee802154_transmit_done(). Forcing RX here
+  // (the old bug) flips the radio back before the frame leaves the antenna, so
+  // nothing is transmitted. RX re-arms in the tx-done callback / via rx_when_idle.
   esp_ieee802154_transmit(tx_buf, false); // no CCA — raw injection
-  if (active) esp_ieee802154_receive();   // back to RX on the same channel
+}
+
+// TX-complete callback — overrides the driver's weak symbol. Re-arm RX so a
+// host inject doesn't leave the sniffer deaf (belt-and-suspenders with the
+// rx_when_idle the driver already honors). Runs in the 802.15.4 driver task.
+void esp_ieee802154_transmit_done(const uint8_t *frame, const uint8_t *ack,
+                                  esp_ieee802154_frame_info_t *ack_frame_info) {
+  (void)frame;
+  (void)ack;
+  (void)ack_frame_info;
+  if (active) esp_ieee802154_receive();
 }
 
 uint16_t duta_154_sniff_esp_take(uint8_t *out, uint16_t cap) {
