@@ -273,6 +273,10 @@ enum {
   SKRIT_CFG_DATA_KIND = 0x14,   // rw: 1 byte, a SKRIT_DATA_* kind — switches the bridged
                                 //     medium (uart <-> i2c) where the device supports it;
                                 //     persisted; DATA_DESC reflects the active kind
+  SKRIT_CFG_WIFI_SCAN = 0x15,   // WiFi-capable boards: SET (any value) kicks an async scan;
+                                //     GET returns the latest results — count(1) then, per AP:
+                                //     rssi(1, signed dBm) · channel(1) · ssid_len(1) · ssid(n).
+                                //     Empty (count 0) while scanning or if unsupported.
 };
 // SKRIT_CFG_WIFI_STATUS state byte
 enum {

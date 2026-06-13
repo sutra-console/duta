@@ -36,6 +36,15 @@ static char wifi_ssid[33], wifi_pass[65];
 static char wifi_ap_name[32];
 static char wifi_ip[20];
 static uint32_t wifi_join_t0;
+// Latest WiFi scan results (CFG_WIFI_SCAN): filled by the SCAN_DONE event.
+#define WIFI_SCAN_MAX 12
+static struct {
+  int8_t rssi;
+  uint8_t ch;
+  uint8_t ssid_len;
+  char ssid[33];
+} wifi_scan_aps[WIFI_SCAN_MAX];
+static uint8_t wifi_scan_n;
 static volatile bool wifi_got_ip;
 
 // ---- the WebSocket-session skrit_dev ----------------------------------------
@@ -132,6 +141,21 @@ static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data) {
     ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
     esp_ip4addr_ntoa(&e->ip_info.ip, wifi_ip, sizeof wifi_ip);
     wifi_got_ip = true;
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+    uint16_t num = 0;
+    esp_wifi_scan_get_ap_num(&num);
+    static wifi_ap_record_t recs[WIFI_SCAN_MAX]; // static: keep ~1KB off the stack
+    uint16_t got = num > WIFI_SCAN_MAX ? WIFI_SCAN_MAX : num;
+    if (esp_wifi_scan_get_ap_records(&got, recs) == ESP_OK) {
+      wifi_scan_n = (uint8_t)got;
+      for (uint16_t i = 0; i < got; i++) {
+        wifi_scan_aps[i].rssi = recs[i].rssi;
+        wifi_scan_aps[i].ch = recs[i].primary;
+        uint8_t n = (uint8_t)strnlen((const char *)recs[i].ssid, 32);
+        wifi_scan_aps[i].ssid_len = n;
+        memcpy(wifi_scan_aps[i].ssid, recs[i].ssid, n);
+      }
+    }
   }
 }
 
@@ -296,6 +320,24 @@ static int16_t duta_wifi_cfg_get(uint8_t key, uint8_t *out, uint8_t cap) {
     memcpy(out + 1, detail, n);
     return (int16_t)(1 + n);
   }
+  case SKRIT_CFG_WIFI_SCAN: {
+    if (cap < 1) return -1;
+    // count(1) then, per AP: rssi(1) · channel(1) · ssid_len(1) · ssid — capped to cap.
+    uint8_t enc = 0;
+    uint16_t off = 1;
+    for (uint8_t i = 0; i < wifi_scan_n; i++) {
+      uint16_t need = 3 + wifi_scan_aps[i].ssid_len;
+      if (off + need > cap) break;
+      out[off++] = (uint8_t)wifi_scan_aps[i].rssi;
+      out[off++] = wifi_scan_aps[i].ch;
+      out[off++] = wifi_scan_aps[i].ssid_len;
+      memcpy(out + off, wifi_scan_aps[i].ssid, wifi_scan_aps[i].ssid_len);
+      off += wifi_scan_aps[i].ssid_len;
+      enc++;
+    }
+    out[0] = enc;
+    return (int16_t)off;
+  }
   default:
     return -1;
   }
@@ -317,6 +359,18 @@ static uint8_t duta_wifi_cfg_set(uint8_t key, const uint8_t *val, uint8_t len) {
     wifi_save_creds();
     if (wifi_ssid[0]) wifi_join();
     return SKRIT_ST_OK;
+  case SKRIT_CFG_WIFI_SCAN: {
+    (void)val;
+    (void)len;
+    // Ensure a STA interface exists to scan on; if we're running the captive
+    // portal (AP), add STA (APSTA) so the portal stays up during the scan.
+    wifi_mode_t m = WIFI_MODE_NULL;
+    esp_wifi_get_mode(&m);
+    if (m == WIFI_MODE_AP) esp_wifi_set_mode(WIFI_MODE_APSTA);
+    wifi_scan_n = 0;
+    esp_wifi_scan_start(NULL, false); // async, all channels; SCAN_DONE fills the buffer
+    return SKRIT_ST_OK;
+  }
   default:
     return SKRIT_ST_NOTFOUND;
   }
