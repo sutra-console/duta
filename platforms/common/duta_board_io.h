@@ -57,6 +57,16 @@ static const duta_pin_use duta_role_uses[] = {
 #if defined(RTS_PIN) && (RTS_PIN) >= 0
     {RTS_PIN, DUTA_USE_FIXED, "target RTS"},
 #endif
+// I²C master bus pins, when a target wires them (the DATA medium uses them only
+// in i2c mode). DUAL, not FIXED: still offerable for provisioning, but flagged so
+// the host warns. Only present when the target defines them (duta_i2c.h's GP8/9
+// fallback is included after this header, so generic boards don't reserve).
+#if defined(I2C_SCL_PIN) && (I2C_SCL_PIN) >= 0
+    {I2C_SCL_PIN, DUTA_USE_DUAL, "I2C SCL"},
+#endif
+#if defined(I2C_SDA_PIN) && (I2C_SDA_PIN) >= 0
+    {I2C_SDA_PIN, DUTA_USE_DUAL, "I2C SDA"},
+#endif
 };
 #define DUTA_ROLE_USES_N ((uint8_t)(sizeof duta_role_uses / sizeof duta_role_uses[0]))
 #endif
