@@ -73,6 +73,7 @@ extern "C" {
 #include "driver/gpio.h" // gpio_pullup_en — pull the DATA RX line when unwired
 #ifndef DUTA_NO_NET
 #include "duta_i2c.h"    // I2C master DATA backend (Wire) — the first non-UART medium
+#include "duta_vl53l0x.h" // VL53L0X ToF sensor exposed as INVOKE commands (over the I2C bus)
 #include "duta_wifi.h"   // WiFi + WebSocket bridge + captive portal (second skrit_dev)
 #endif
 
@@ -166,6 +167,87 @@ static uint8_t hal_i2c_xfer(void *, uint8_t addr, const uint8_t *w, uint8_t wlen
   return st;
 }
 #endif // !DUTA_SNIFFER
+
+// ---- INVOKE: device-owned high-level commands -------------------------------
+// The host (or a macro) forwards an intent and the device runs the multi-step
+// sequence itself. First set: the VL53L0X ToF sensor over the I2C master bus.
+// Vendor ids 0x8000+; the addr arg (u8) defaults to 0x29 when omitted.
+static uint8_t hal_cmd_desc(void *, uint8_t index, uint16_t *id, uint8_t *nargs,
+                            uint8_t *argtype, uint8_t *flags, const char **name) {
+  switch (index) {
+    case 0: *id = 0x8010; *nargs = 1; argtype[0] = SKRIT_ARG_U8; *flags = SKRIT_INVOKE_REPLY; *name = "vl53l0x_id"; break;
+    case 1: *id = 0x8011; *nargs = 1; argtype[0] = SKRIT_ARG_U8; *flags = 0; *name = "vl53l0x_init"; break;
+    case 2: *id = 0x8012; *nargs = 1; argtype[0] = SKRIT_ARG_U8; *flags = SKRIT_INVOKE_REPLY; *name = "vl53l0x_read_mm"; break;
+    case 3: *id = 0x8013; *nargs = 2; argtype[0] = SKRIT_ARG_U8; argtype[1] = SKRIT_ARG_U16; *flags = 0; *name = "vl53l0x_start"; break;
+    case 4: *id = 0x8014; *nargs = 0; *flags = 0; *name = "vl53l0x_stop"; break;
+    default: break;
+  }
+  return 5;
+}
+// vl53l0x_start streams continuous readings on the DATA console; this is its state.
+static bool vl_stream_on = false;
+static uint8_t vl_stream_addr = VL53L0X_DEFAULT_ADDR;
+static uint16_t vl_stream_period = 100; // ms between emitted readings
+static uint32_t vl_stream_last = 0;
+
+static uint8_t hal_cmd_invoke(void *, uint16_t id, const uint8_t *p, uint8_t plen,
+                              uint8_t *reply, uint8_t cap, uint8_t *rlen) {
+  *rlen = 0;
+  uint8_t addr = plen >= 1 ? p[0] : VL53L0X_DEFAULT_ADDR;
+  switch (id) {
+    case 0x8010: // vl53l0x_id -> model-id byte (0xEE on a healthy part)
+      if (cap < 1) return SKRIT_ST_BADARGS;
+      reply[0] = vl53l0x_model_id(addr);
+      *rlen = 1;
+      return SKRIT_ST_OK;
+    case 0x8011: // vl53l0x_init -> status only
+      return vl53l0x_init(addr) ? SKRIT_ST_OK : SKRIT_ST_NOTFOUND;
+    case 0x8012: { // vl53l0x_read_mm -> u16 millimetres (LE)
+      bool ok = false;
+      uint16_t mm = vl53l0x_read_mm(addr, &ok);
+      if (!ok) return SKRIT_ST_NOTFOUND;
+      if (cap < 2) return SKRIT_ST_BADARGS;
+      reply[0] = (uint8_t)mm;
+      reply[1] = (uint8_t)(mm >> 8);
+      *rlen = 2;
+      return SKRIT_ST_OK;
+    }
+    case 0x8013: { // vl53l0x_start(addr u8, period_ms u16) -> stream on the console
+      if (!vl53l0x_init(addr)) return SKRIT_ST_NOTFOUND;
+      if (!vl53l0x_start_continuous(addr)) return SKRIT_ST_NOTFOUND;
+      uint16_t period = plen >= 3 ? (uint16_t)(p[1] | (p[2] << 8)) : 100;
+      vl_stream_addr = addr;
+      vl_stream_period = period < 20 ? 20 : period; // floor below the sensor's sample rate is pointless
+      vl_stream_last = 0;
+      vl_stream_on = true;
+      return SKRIT_ST_OK;
+    }
+    case 0x8014: // vl53l0x_stop -> end the stream
+      if (vl_stream_on) vl53l0x_stop_continuous(vl_stream_addr);
+      vl_stream_on = false;
+      return SKRIT_ST_OK;
+    default: break;
+  }
+  return SKRIT_ST_NOTFOUND;
+}
+
+// Called every loop: when a stream is active, emit the latest reading on the DATA
+// console as "vl53l0x=<mm>\r\n" (parseable by a yantra "uart" readout/table). Only
+// in UART/console kind — in I2C-record kind the DATA channel carries framed records.
+static void vl53_stream_pump() {
+  if (!vl_stream_on || g_data_kind != SKRIT_DATA_UART) return;
+  uint32_t now = millis();
+  if (now - vl_stream_last < vl_stream_period) return;
+  vl_stream_last = now;
+  bool ok = false;
+  uint16_t mm = vl53l0x_read_continuous_mm(vl_stream_addr, &ok);
+  if (!ok) return; // no fresh sample yet
+  char line[24];
+  int n = snprintf(line, sizeof line, "vl53l0x=%u\r\n", (unsigned)mm);
+  if (n <= 0) return;
+  skrit_dev_feed_data(&dev, (const uint8_t *)line, (uint16_t)n);
+  skrit_dev_feed_data(&ws_dev, (const uint8_t *)line, (uint16_t)n);
+}
 
 // Translate (bits,parity,stop) into the Arduino SerialConfig word, covering the
 // configs people actually use; falls back to 8N1.
@@ -385,6 +467,8 @@ void setup() {
   HAL.cfg_set = hal_cfg_set;
   HAL.i2c_scan = hal_i2c_scan; // I2C master (active when DATA kind = i2c)
   HAL.i2c_xfer = hal_i2c_xfer;
+  HAL.cmd_desc = hal_cmd_desc; // INVOKE: device-owned commands (VL53L0X); set
+  HAL.cmd_invoke = hal_cmd_invoke; // before duta_wifi_init so the WS HAL copy gets them
   skrit_dev_init(&dev, &HAL, nullptr, /*muxed*/ 1);
   duta_wifi_init(&HAL); // WS bridge: copies the HAL, joins / raises the portal
   data_kind_load();     // after wifi_init so the WS_HAL copy gets the kind too
@@ -403,6 +487,7 @@ void loop() {
     }
   }
   while (Serial.available()) skrit_dev_rx(&dev, (uint8_t)Serial.read());
+  vl53_stream_pump();  // INVOKE-started sensor stream -> DATA console (no-op unless started)
   duta_wifi_loop(); // WiFi state machine + WS server pump
 }
 #endif // DUTA_SNIFFER
