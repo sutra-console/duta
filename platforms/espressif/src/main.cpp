@@ -239,11 +239,14 @@ static void vl53_stream_pump() {
   uint32_t now = millis();
   if (now - vl_stream_last < vl_stream_period) return;
   vl_stream_last = now;
-  bool ok = false;
-  uint16_t mm = vl53l0x_read_continuous_mm(vl_stream_addr, &ok);
+  bool ok = false, valid = false;
+  uint16_t mm = vl53l0x_read_continuous_mm(vl_stream_addr, &ok, &valid);
   if (!ok) return; // no fresh sample yet
   char line[24];
-  int n = snprintf(line, sizeof line, "vl53l0x=%u\r\n", (unsigned)mm);
+  // valid → the distance; non-detection (status invalid / out of range) → a clear
+  // "none" marker so the host can hold its last value instead of acting on garbage.
+  int n = valid ? snprintf(line, sizeof line, "vl53l0x=%u\r\n", (unsigned)mm)
+                : snprintf(line, sizeof line, "vl53l0x=none\r\n");
   if (n <= 0) return;
   skrit_dev_feed_data(&dev, (const uint8_t *)line, (uint16_t)n);
   skrit_dev_feed_data(&ws_dev, (const uint8_t *)line, (uint16_t)n);

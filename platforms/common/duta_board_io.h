@@ -67,6 +67,9 @@ static const duta_pin_use duta_role_uses[] = {
 #if defined(I2C_SDA_PIN) && (I2C_SDA_PIN) >= 0
     {I2C_SDA_PIN, DUTA_USE_DUAL, "I2C SDA"},
 #endif
+#if defined(VL53L0X_XSHUT_PIN) && (VL53L0X_XSHUT_PIN) >= 0
+    {VL53L0X_XSHUT_PIN, DUTA_USE_DUAL, "VL53L0X XSHUT"},
+#endif
 };
 #define DUTA_ROLE_USES_N ((uint8_t)(sizeof duta_role_uses / sizeof duta_role_uses[0]))
 #endif

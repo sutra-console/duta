@@ -22,6 +22,9 @@
 // broken out on the side header, not fixed). Overrides duta_i2c.h's GP8/9 default.
 #define I2C_SCL_PIN 1
 #define I2C_SDA_PIN 2
+// VL53L0X XSHUT (active-low shutdown/reset) on GP4 — driven by the ToF driver to
+// power-cycle the sensor on init.
+#define VL53L0X_XSHUT_PIN 4
 
 #include "duta_board_io.h"
 

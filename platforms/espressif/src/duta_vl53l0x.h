@@ -73,8 +73,21 @@ static const uint8_t vl53__tuning[] = {
     0xFF, 0x00, 0x80, 0x00,
 };
 
+// Pulse XSHUT low→high to power-cycle the sensor into a known state (if the target
+// wires it), then wait for the ~1.2 ms boot. No-op when XSHUT isn't defined.
+static void vl53__power_on(void) {
+#ifdef VL53L0X_XSHUT_PIN
+  pinMode(VL53L0X_XSHUT_PIN, OUTPUT);
+  digitalWrite(VL53L0X_XSHUT_PIN, LOW); // assert shutdown (active low)
+  delay(10);
+  digitalWrite(VL53L0X_XSHUT_PIN, HIGH); // release; sensor boots from NVM
+  delay(10);
+#endif
+}
+
 // IDENTIFICATION_MODEL_ID (0xC0) — 0xEE on a healthy part. Cheap presence probe.
 static uint8_t vl53l0x_model_id(uint8_t addr) {
+  vl53__power_on();
   duta_i2c_begin();
   return vl53__r8(addr, 0xC0);
 }
@@ -121,6 +134,7 @@ static bool vl53__ref_cal(uint8_t a, uint8_t vhv) {
 
 // Full init: returns true once the sensor is ready for single-shot ranging.
 static bool vl53l0x_init(uint8_t addr) {
+  vl53__power_on(); // XSHUT pulse: clean power-cycle before configuring
   duta_i2c_begin();
   if (vl53__r8(addr, 0xC0) != VL53L0X_MODEL_ID) return false; // not a VL53L0X
 
@@ -190,12 +204,18 @@ static bool vl53l0x_start_continuous(uint8_t a) {
 
 // Non-blocking: returns the latest sample with *ok=true if one is ready, else
 // *ok=false (no new measurement yet — caller should just try again later).
-static uint16_t vl53l0x_read_continuous_mm(uint8_t a, bool *ok) {
+// *valid=false marks a non-detection: the range-status field (RESULT_RANGE_STATUS
+// bits 3:7) isn't 11 ("range complete"), or the range saturated (>= 8190 = no
+// target in range). The caller can then hold/skip rather than act on a bad reading.
+static uint16_t vl53l0x_read_continuous_mm(uint8_t a, bool *ok, bool *valid) {
   *ok = false;
+  *valid = false;
   if ((vl53__r8(a, 0x13) & 0x07) == 0) return 0; // RESULT_INTERRUPT_STATUS: nothing new
+  uint8_t status = vl53__r8(a, 0x14);            // RESULT_RANGE_STATUS
   uint16_t range = vl53__r16(a, 0x1E);
   vl53__w8(a, 0x0B, 0x01); // clear interrupt
   *ok = true;
+  *valid = (((status >> 3) & 0x0F) == 11) && range < 8190;
   return range;
 }
 
