@@ -360,10 +360,22 @@ static void transport_start(void) {
 #define TRANSPORT_HOST_WRITE NULL        // muxed: core wraps console onto link_write
 #endif // transport
 
+// Unified sniffer: true when the active DATA kind is UART (CFG 0x14 = 0) — the
+// radio is off and DATA is the hardware-UART bridge instead of captured frames.
+#ifdef DUTA_SNIFF_MULTI
+static bool uart_fwd;
+#endif
+
 // ---- DATA console + control HAL (shared by both transports) ----------------
 static void hal_data_write(void *c, const uint8_t *p, uint16_t n) {
   ARG_UNUSED(c);
-#ifdef DUTA_SNIFF_HAS_TX
+#ifdef DUTA_SNIFF_MULTI
+  if (!uart_fwd) { // radio mode: a host DATA write is a frame to inject over the air
+    duta_sniffer_tx(p, n);
+    return;
+  }
+  // uart-forward mode: fall through to the UART bridge below
+#elif defined(DUTA_SNIFF_HAS_TX)
   // The "wire" is the radio: a host DATA write is a frame to inject over the air.
   duta_sniffer_tx(p, n);
   return;
@@ -381,7 +393,7 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
 }
 
 #ifdef DUTA_SNIFF_MULTI
-static void set_sniff_mode(uint8_t kind); // switch PHY + sync data_kind; defined after HAL
+static void set_data_mode(uint8_t kind); // switch UART/BLE/802.15.4 + sync data_kind; after HAL
 #endif
 
 static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
@@ -395,7 +407,7 @@ static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
 #endif
 #ifdef DUTA_SNIFF_MULTI
   if (idx == MODE_OUT_IDX) { // virtual radio-mode toggle: off = BLE, on = 802.15.4
-    set_sniff_mode(on ? SKRIT_DATA_IEEE802154 : SKRIT_DATA_BLE_SNIFF);
+    set_data_mode(on ? SKRIT_DATA_IEEE802154 : SKRIT_DATA_BLE_SNIFF);
     return;
   }
 #endif
@@ -647,12 +659,24 @@ static skrit_hal HAL = {
 };
 
 #ifdef DUTA_SNIFF_MULTI
-// Switch the live radio PHY: select() stops the old PHY, re-inits the target, and
-// restarts capture if it was on; then mirror the active kind into HAL.data_kind so
-// DATA_DESC (and the extcap's DLT) follow it. Shared by the CFG path and the
-// Controls-panel radio-mode toggle.
-static void set_sniff_mode(uint8_t kind) {
-  duta_sniffer_select(kind);
+// Switch the live DATA mode across all three kinds the unified build supports:
+//   uart (0)      → radio off; DATA is the hardware-UART bridge (uart_fwd path)
+//   ble (4) / 154 (7) → the matching raw-radio sniffer PHY
+// Then mirror the active kind into HAL.data_kind so DATA_DESC (and the extcap's
+// DLT) follow it. Shared by the CFG route and the Controls radio-mode toggle.
+static void set_data_mode(uint8_t kind) {
+  if (kind == SKRIT_DATA_UART) {
+    if (duta_sniffer_is_on()) duta_sniffer_stop(); // park the radio
+    uart_fwd = true;
+    HAL.data_kind = SKRIT_DATA_UART;
+    return;
+  }
+  uart_fwd = false;
+  duta_sniffer_select(kind);                  // updates `active` (no-op if already kind)
+  if (!duta_sniffer_is_on()) {                // coming back from UART: bring the radio up
+    duta_sniffer_init();
+    duta_sniffer_start();
+  }
   HAL.data_kind = duta_sniffer_kind();
 }
 // CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): the host-config route to the same switch.
@@ -660,9 +684,10 @@ static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len
   ARG_UNUSED(c);
   if (key != SKRIT_CFG_DATA_KIND) return SKRIT_ST_UNSUPPORTED;
   if (len < 1) return SKRIT_ST_BADARGS;
-  if (val[0] != SKRIT_DATA_BLE_SNIFF && val[0] != SKRIT_DATA_IEEE802154)
-    return SKRIT_ST_BADARGS; // this radio only does BLE + 802.15.4
-  set_sniff_mode(val[0]);
+  if (val[0] != SKRIT_DATA_UART && val[0] != SKRIT_DATA_BLE_SNIFF &&
+      val[0] != SKRIT_DATA_IEEE802154)
+    return SKRIT_ST_BADARGS; // uart bridge, BLE, or 802.15.4
+  set_data_mode(val[0]);
   return SKRIT_ST_OK;
 }
 #endif
@@ -783,11 +808,27 @@ int main(void) {
   // Sniffer build: DATA is captured radio frames (no UART) — the sniff_thread
   // drains them into the core (woken by duta_sniffer_notify() or its 100 ms
   // tick). CMD rides the interrupt-fed cmd_rx_thread. The "Sniffing" virtual
-  // output (SNIFF_OUT_IDX) starts/stops capture; default on. Nothing left for
-  // main() to pump, so it sleeps.
+  // output (SNIFF_OUT_IDX) starts/stops capture; default on.
   duta_sniffer_init();
   duta_sniffer_start();
-  for (;;) k_sleep(K_FOREVER);
+#ifdef DUTA_SNIFF_MULTI
+  // The unified build can also be a UART bridge (CFG 0x14 = 0): when in that mode
+  // the radio is parked and this loop tees the hardware DATA UART to the host
+  // (skrit_dev_poll), exactly like the non-sniffer build. In a radio mode it idles
+  // and the sniff_thread does the work.
+  for (;;) {
+    if (uart_fwd) {
+      DEV_LOCK();
+      skrit_dev_poll(&dev);
+      DEV_UNLOCK();
+      k_msleep(1);
+    } else {
+      k_msleep(20);
+    }
+  }
+#else
+  for (;;) k_sleep(K_FOREVER); // single-PHY sniffer: nothing left for main() to pump
+#endif
 #else
   // USB CDC bridge: CMD RX is interrupt-driven; this loop only tees the target
   // DATA console out to the host (skrit_dev_poll reads the DATA UART by poll —

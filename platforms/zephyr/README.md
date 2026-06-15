@@ -109,9 +109,13 @@ west build -b promicro_nrf52840/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=o
 Both `duta_ble_sniff.c` and `duta_154_sniff.c` are compiled in and dispatched
 through a vtable (`duta_sniffer_multi.c`). The host switches with **`CFG_SET` key
 `0x14`** (`SKRIT_CFG_DATA_KIND`): `4` = BLE advertising (ch 37/38/39), `7` = IEEE
-802.15.4 (ch 11–26). A switch stops the old PHY, re-inits the radio for the
-target, and resumes capture; `DATA_DESC` then reports the active kind so the
-Wireshark extcap picks the matching DLT. **Zigbee, Thread, and Matter-over-Thread
+802.15.4 (ch 11–26), and **`0` = UART bridge** — parks the radio and forwards the
+hardware DATA UART as the console (the same bridge the non-sniffer build runs), so
+one image is a UART bridge *and* both sniffers. A switch stops the old mode,
+re-inits the radio for the target (or parks it for UART), and resumes; `DATA_DESC`
+then reports the active kind so the Wireshark extcap picks the matching DLT
+(uart → console pcap). The Controls panel's radio toggle covers BLE↔802.15.4;
+UART is reached via the CFG key. **Zigbee, Thread, and Matter-over-Thread
 are all kind `7`** — the same 802.15.4 capture, told apart only by the Wireshark
 dissector (Matter-over-Wi-Fi needs a Wi-Fi radio, not the nRF). Boots in BLE mode.
 The single-PHY `overlay-sniff.conf` / `overlay-sniff154.conf` builds remain as
