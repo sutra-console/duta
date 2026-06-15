@@ -17,10 +17,11 @@
 		duta-data = &uart0; // led0/led1/led2 are already aliased by the board
 	};
 
-	// ADC input (skrit input 0): the nRF52840's internal VDD (mV) — no pin
-	// needed, verifiable over USB. Point at an &adc channel for an external pad.
+	// Two internal ADC inputs (skrit inputs 0/1): ch0 = VDD ("Supply (mV)", the
+	// regulated rail); ch1 = VDDHDIV5 ("Battery (mV)", VDDH/5 ×5 in fw — the cell
+	// on this nice!nano-class board, but reads high on USB). No pin needed.
 	zephyr,user {
-		io-channels = <&adc 0>;
+		io-channels = <&adc 0>, <&adc 1>;
 	};
 };
 
@@ -47,6 +48,14 @@
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,input-positive = <NRF_SAADC_VDD>;
+		zephyr,resolution = <12>;
+	};
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,input-positive = <NRF_SAADC_VDDHDIV5>; // battery via VDDH/5 (×5 in fw)
 		zephyr,resolution = <12>;
 	};
 };

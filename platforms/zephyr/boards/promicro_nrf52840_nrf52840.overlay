@@ -18,13 +18,17 @@
 		duta-data = &uart0; // led0 (status LED) is already aliased by the board
 	};
 
-	// ADC input (skrit input 0). Defaults to the nRF52840's internal supply
-	// reading (VDD, in mV) — needs no broken-out pin and is verifiable over USB.
-	// To read an external analog pad instead, point this at &adc channel@N and
-	// set that channel's zephyr,input-positive = <NRF_SAADC_AINx> (e.g. AIN0 =
-	// P0.02, AIN2 = P0.04). main.c reports whatever channel 0 measures, in mV.
+	// Two ADC inputs (skrit inputs 0 and 1), both internal — no broken-out pin:
+	//   ch 0 = NRF_SAADC_VDD     → "Supply (mV)": the regulated rail (~3.0–3.3 V).
+	//   ch 1 = NRF_SAADC_VDDHDIV5 → "Battery (mV)": VDDH/5; main.c ×5. On this
+	//     nice!nano-clone family VDDH is fed from the LiPo (HV mode), so this reads
+	//     the cell — but it tracks VDDH, so it reads HIGH on USB (~charge voltage),
+	//     not the battery. The board's labelled P0.04 battery divider is mis-wired
+	//     to P0.24 (no SAADC channel) upstream, so VDDHDIV5 is the usable path.
+	// For an external analog pad instead, point a channel at <NRF_SAADC_AINx>
+	// (AIN0 = P0.02, AIN2 = P0.04) and drop the ×5 in main.c for that index.
 	zephyr,user {
-		io-channels = <&adc 0>;
+		io-channels = <&adc 0>, <&adc 1>;
 	};
 };
 
@@ -39,6 +43,14 @@
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,input-positive = <NRF_SAADC_VDD>;
+		zephyr,resolution = <12>;
+	};
+	channel@1 {
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,input-positive = <NRF_SAADC_VDDHDIV5>; // battery via VDDH/5 (×5 in fw)
 		zephyr,resolution = <12>;
 	};
 };

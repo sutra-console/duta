@@ -80,13 +80,32 @@ static uint8_t g_out[DUTA_N_GPIO_OUT];
 static const struct gpio_dt_spec dtr_gpio = GPIO_DT_SPEC_GET_OR(DT_ALIAS(duta_dtr), gpios, {0});
 static const struct gpio_dt_spec rts_gpio = GPIO_DT_SPEC_GET_OR(DT_ALIAS(duta_rts), gpios, {0});
 
-// ---- optional ADC input (skrit input 0) — present when a board overlay gives a
-// `zephyr,user` node with `io-channels` (see the promicro overlay). Reports the
-// channel in millivolts. -----------------------------------------------------
+// ---- optional ADC inputs — present when a board overlay gives a `zephyr,user`
+// node with `io-channels`. One skrit analog input per io-channel, in millivolts.
+// Boards conventionally list ch0 = VDD ("Supply") and, where the battery sits on
+// VDDH (nice!nano-class), ch1 = VDDHDIV5 ("Battery") which we ×5 to undo the /5.
+// adc_scale[i] = 1 normally, 5 for a VDDHDIV5 channel. ------------------------
 #if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), io_channels)
 #define HAVE_ADC 1
-#define DUTA_N_INPUTS 1
-static const struct adc_dt_spec adc_ch = ADC_DT_SPEC_GET(DT_PATH(zephyr_user));
+#define DUTA_N_INPUTS DT_PROP_LEN(DT_PATH(zephyr_user), io_channels)
+static const struct adc_dt_spec adc_chs[] = {
+    ADC_DT_SPEC_GET_BY_IDX(DT_PATH(zephyr_user), 0),
+#if DT_PROP_LEN(DT_PATH(zephyr_user), io_channels) > 1
+    ADC_DT_SPEC_GET_BY_IDX(DT_PATH(zephyr_user), 1),
+#endif
+};
+static const uint16_t adc_scale[] = {
+    1,
+#if DT_PROP_LEN(DT_PATH(zephyr_user), io_channels) > 1
+    5, // ch1 = VDDHDIV5: battery = sample × 5
+#endif
+};
+static const char *const IN_NAME[] = {
+    "Supply (mV)",
+#if DT_PROP_LEN(DT_PATH(zephyr_user), io_channels) > 1
+    "Battery (mV)", // VDDH/5 ×5 — reads the cell on battery, ~charge V on USB
+#endif
+};
 #else
 #define HAVE_ADC 0
 #define DUTA_N_INPUTS 0
@@ -451,16 +470,18 @@ static void hal_in_desc(void *c, uint8_t idx, uint8_t *type, const char **name) 
   ARG_UNUSED(c);
   if (idx >= DUTA_N_INPUTS) return;
   *type = SKRIT_IN_ANALOG;
-  *name = "ADC (mV)";
+  *name = IN_NAME[idx];
 }
 static uint16_t hal_in_get(void *c, uint8_t idx) {
   ARG_UNUSED(c);
   if (idx >= DUTA_N_INPUTS) return 0;
   int16_t raw = 0;
   struct adc_sequence seq = {.buffer = &raw, .buffer_size = sizeof raw};
-  if (adc_sequence_init_dt(&adc_ch, &seq) != 0 || adc_read_dt(&adc_ch, &seq) != 0) return 0;
+  if (adc_sequence_init_dt(&adc_chs[idx], &seq) != 0 || adc_read_dt(&adc_chs[idx], &seq) != 0)
+    return 0;
   int32_t mv = raw;
-  if (adc_raw_to_millivolts_dt(&adc_ch, &mv) != 0) mv = raw; // unscaled fallback
+  if (adc_raw_to_millivolts_dt(&adc_chs[idx], &mv) != 0) mv = raw; // unscaled fallback
+  mv *= adc_scale[idx]; // ×5 for a VDDHDIV5 (battery) channel, ×1 otherwise
   return (uint16_t)(mv < 0 ? 0 : (mv > 0xFFFF ? 0xFFFF : mv));
 }
 #endif
@@ -773,7 +794,8 @@ int main(void) {
   if (device_is_ready(dtr_gpio.port)) gpio_pin_configure_dt(&dtr_gpio, GPIO_OUTPUT_INACTIVE);
   if (device_is_ready(rts_gpio.port)) gpio_pin_configure_dt(&rts_gpio, GPIO_OUTPUT_INACTIVE);
 #if HAVE_ADC
-  if (adc_is_ready_dt(&adc_ch)) adc_channel_setup_dt(&adc_ch);
+  for (int i = 0; i < DUTA_N_INPUTS; i++)
+    if (adc_is_ready_dt(&adc_chs[i])) adc_channel_setup_dt(&adc_chs[i]);
 #endif
 
   skrit_dev_init(&dev, &HAL, NULL, /*muxed*/ TRANSPORT_MUXED);
