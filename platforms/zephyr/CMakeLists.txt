@@ -12,3 +12,6 @@ target_include_directories(app PRIVATE
 target_sources(app PRIVATE src/main.c)
 target_sources_ifdef(CONFIG_DUTA_SNIFF app PRIVATE src/duta_ble_sniff.c)
 target_sources_ifdef(CONFIG_DUTA_SNIFF_154 app PRIVATE src/duta_154_sniff.c)
+# Unified build: both raw-radio backends + the runtime dispatch vtable.
+target_sources_ifdef(CONFIG_DUTA_SNIFF_MULTI app PRIVATE
+  src/duta_ble_sniff.c src/duta_154_sniff.c src/duta_sniffer_multi.c)

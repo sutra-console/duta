@@ -98,6 +98,34 @@
 #define DUTA_SNIFF_HAS_CHANNEL 1
 #define DUTA_SNIFF_HAS_TX 1
 
+// ---- Unified runtime-switchable sniffer (Zephyr/nRF): BOTH the BLE and the
+//      IEEE 802.15.4 backends compiled in and dispatched through a vtable. One
+//      nRF radio, so exactly one PHY is live at a time — the host switches it at
+//      RUNTIME with CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): 4 = BLE advertising,
+//      7 = IEEE 802.15.4 (Zigbee / Thread / Matter-over-Thread, same capture —
+//      the difference is only the Wireshark dissector). A switch fully re-inits
+//      the radio for the target PHY. DATA_DESC reports the active kind so the
+//      extcap picks the matching DLT. Unlike the arms above, duta_sniffer_* are
+//      real functions here (duta_sniffer_multi.c), not a macro alias. ---------
+#elif defined(CONFIG_DUTA_SNIFF_MULTI)
+#include <stdbool.h>
+#include <stdint.h>
+#define DUTA_SNIFFER 1
+#define DUTA_SNIFF_MULTI 1
+#define DUTA_SNIFF_HAS_CHANNEL 1
+#define DUTA_SNIFF_HAS_TX 1
+#define DUTA_SNIFF_KIND SKRIT_DATA_BLE_SNIFF // INITIAL kind; runtime via duta_sniffer_select()
+void duta_sniffer_init(void);
+void duta_sniffer_start(void);
+void duta_sniffer_stop(void);
+bool duta_sniffer_is_on(void);
+uint16_t duta_sniffer_take(uint8_t *out, uint16_t cap);
+void duta_sniffer_set_channel(uint8_t ch);
+uint8_t duta_sniffer_get_channel(void);
+void duta_sniffer_tx(const uint8_t *frame, uint16_t len);
+uint8_t duta_sniffer_kind(void);        // the active SKRIT_DATA_* kind (4 or 7)
+bool duta_sniffer_select(uint8_t kind);  // switch by DATA kind; true if it changed
+
 #endif
 
 #endif // DUTA_SNIFFER_H

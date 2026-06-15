@@ -27,7 +27,8 @@
 
 // The 802.15.4 sniffer streams whole MAC frames (up to 127 B) as one DATA record
 // (~137 B); raise the device send-buffer cap so each rides a single mux frame.
-#if defined(CONFIG_DUTA_SNIFF_154)
+// The unified (multi) build includes that backend too, so it needs the headroom.
+#if defined(CONFIG_DUTA_SNIFF_154) || defined(CONFIG_DUTA_SNIFF_MULTI)
 #define SKRIT_SEND_CAP 200
 #endif
 #include "skrit_device.h"
@@ -569,11 +570,24 @@ static uint8_t hal_cmd_invoke(void *c, uint16_t id, const uint8_t *p, uint8_t pl
   return SKRIT_ST_NOTFOUND;
 }
 
-static const skrit_hal HAL = {
+// Unified sniffer: the host switches the live PHY at runtime via CFG_SET key 0x14
+// (SKRIT_CFG_DATA_KIND). 4 = BLE advertising, 7 = IEEE 802.15.4 (Zigbee/Thread/
+// Matter-over-Thread). We re-init the radio for the target PHY and update the
+// reported data_kind so DATA_DESC (and the extcap's DLT) follow the active link.
+#ifdef DUTA_SNIFF_MULTI
+static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len);
+#endif
+
+// Non-const so DUTA_SNIFF_MULTI's cfg_set can update data_kind at runtime; the
+// core only ever reads it (DATA_DESC), so the lone writer is our own cfg_set.
+static skrit_hal HAL = {
     .name = "Duta nRF52840",
     .fw_ver = (FW_HI << 8) | FW_LO,
 #ifdef DUTA_SNIFFER
     .data_kind = DUTA_SNIFF_KIND, // DATA is captured radio frames, not a UART console
+#endif
+#ifdef DUTA_SNIFF_MULTI
+    .cfg_set = hal_cfg_set, // CFG key 0x14 switches BLE ↔ 802.15.4 at runtime
 #endif
     .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
@@ -603,6 +617,22 @@ static const skrit_hal HAL = {
     .cmd_desc = hal_cmd_desc,   // advertises SKRIT_FLAG_INVOKE + the demo commands
     .cmd_invoke = hal_cmd_invoke,
 };
+
+#ifdef DUTA_SNIFF_MULTI
+// CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): switch the live radio PHY. The select
+// stops the old PHY, re-inits the target, and restarts capture if it was on; we
+// then mirror the active kind into HAL.data_kind so DATA_DESC reports it.
+static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len) {
+  ARG_UNUSED(c);
+  if (key != SKRIT_CFG_DATA_KIND) return SKRIT_ST_UNSUPPORTED;
+  if (len < 1) return SKRIT_ST_BADARGS;
+  if (val[0] != SKRIT_DATA_BLE_SNIFF && val[0] != SKRIT_DATA_IEEE802154)
+    return SKRIT_ST_BADARGS; // this radio only does BLE + 802.15.4
+  duta_sniffer_select(val[0]);
+  HAL.data_kind = duta_sniffer_kind();
+  return SKRIT_ST_OK;
+}
+#endif
 
 // ===========================================================================
 // Event-driven IO threads

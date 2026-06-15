@@ -97,6 +97,26 @@ is future work.
 
 (Run inside a Zephyr workspace, or point `ZEPHYR_BASE` at one.)
 
+### Unified runtime-switchable sniffer (BLE + 802.15.4)
+
+The nRF radio does both BLE and 802.15.4, so one image can carry both backends
+and switch the live PHY at runtime — no reflash to move between protocols:
+
+```sh
+west build -b promicro_nrf52840/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=overlay-sniff-multi.conf
+```
+
+Both `duta_ble_sniff.c` and `duta_154_sniff.c` are compiled in and dispatched
+through a vtable (`duta_sniffer_multi.c`). The host switches with **`CFG_SET` key
+`0x14`** (`SKRIT_CFG_DATA_KIND`): `4` = BLE advertising (ch 37/38/39), `7` = IEEE
+802.15.4 (ch 11–26). A switch stops the old PHY, re-inits the radio for the
+target, and resumes capture; `DATA_DESC` then reports the active kind so the
+Wireshark extcap picks the matching DLT. **Zigbee, Thread, and Matter-over-Thread
+are all kind `7`** — the same 802.15.4 capture, told apart only by the Wireshark
+dissector (Matter-over-Wi-Fi needs a Wi-Fi radio, not the nRF). Boots in BLE mode.
+The single-PHY `overlay-sniff.conf` / `overlay-sniff154.conf` builds remain as
+lighter options.
+
 ### Sniffer backends are pluggable
 
 Both sniffers sit behind a portable contract in
