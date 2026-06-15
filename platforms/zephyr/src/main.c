@@ -42,7 +42,15 @@
 #define DUTA_N_GPIO_OUT 1 // onboard status LED (led0) — the onboard-only default
 #ifdef DUTA_SNIFFER
 #define SNIFF_OUT_IDX DUTA_N_GPIO_OUT // a virtual "Sniffing" output past the gpios
+#ifdef DUTA_SNIFF_MULTI
+// The unified sniffer adds a second virtual control: a radio-mode toggle
+// (off = BLE advertising, on = IEEE 802.15.4) so the PHY is switchable from the
+// Controls panel, not just CFG. It rides the same duta_sniffer_select() path.
+#define MODE_OUT_IDX (DUTA_N_GPIO_OUT + 1)
+#define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 2)
+#else
 #define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 1)
+#endif
 #else
 #define DUTA_N_OUTPUTS DUTA_N_GPIO_OUT
 #endif
@@ -372,12 +380,22 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
   return k;
 }
 
+#ifdef DUTA_SNIFF_MULTI
+static void set_sniff_mode(uint8_t kind); // switch PHY + sync data_kind; defined after HAL
+#endif
+
 static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
   ARG_UNUSED(c);
 #ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) { // virtual "Sniffing" toggle drives the radio
     if (on) duta_sniffer_start();
     else duta_sniffer_stop();
+    return;
+  }
+#endif
+#ifdef DUTA_SNIFF_MULTI
+  if (idx == MODE_OUT_IDX) { // virtual radio-mode toggle: off = BLE, on = 802.15.4
+    set_sniff_mode(on ? SKRIT_DATA_IEEE802154 : SKRIT_DATA_BLE_SNIFF);
     return;
   }
 #endif
@@ -390,6 +408,9 @@ static uint8_t hal_out_get(void *c, uint8_t idx) {
 #ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) return duta_sniffer_is_on() ? 1 : 0;
 #endif
+#ifdef DUTA_SNIFF_MULTI
+  if (idx == MODE_OUT_IDX) return duta_sniffer_kind() == SKRIT_DATA_IEEE802154 ? 1 : 0;
+#endif
   return idx < DUTA_N_GPIO_OUT ? g_out[idx] : 0;
 }
 static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
@@ -398,6 +419,13 @@ static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name)
   if (idx == SNIFF_OUT_IDX) {
     *type = SKRIT_CTRL_IO;
     *name = "Sniffing";
+    return;
+  }
+#endif
+#ifdef DUTA_SNIFF_MULTI
+  if (idx == MODE_OUT_IDX) {
+    *type = SKRIT_CTRL_IO;
+    *name = "802.15.4 (off=BLE)"; // on = Zigbee/Thread/Matter PHY
     return;
   }
 #endif
@@ -619,17 +647,22 @@ static skrit_hal HAL = {
 };
 
 #ifdef DUTA_SNIFF_MULTI
-// CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): switch the live radio PHY. The select
-// stops the old PHY, re-inits the target, and restarts capture if it was on; we
-// then mirror the active kind into HAL.data_kind so DATA_DESC reports it.
+// Switch the live radio PHY: select() stops the old PHY, re-inits the target, and
+// restarts capture if it was on; then mirror the active kind into HAL.data_kind so
+// DATA_DESC (and the extcap's DLT) follow it. Shared by the CFG path and the
+// Controls-panel radio-mode toggle.
+static void set_sniff_mode(uint8_t kind) {
+  duta_sniffer_select(kind);
+  HAL.data_kind = duta_sniffer_kind();
+}
+// CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): the host-config route to the same switch.
 static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len) {
   ARG_UNUSED(c);
   if (key != SKRIT_CFG_DATA_KIND) return SKRIT_ST_UNSUPPORTED;
   if (len < 1) return SKRIT_ST_BADARGS;
   if (val[0] != SKRIT_DATA_BLE_SNIFF && val[0] != SKRIT_DATA_IEEE802154)
     return SKRIT_ST_BADARGS; // this radio only does BLE + 802.15.4
-  duta_sniffer_select(val[0]);
-  HAL.data_kind = duta_sniffer_kind();
+  set_sniff_mode(val[0]);
   return SKRIT_ST_OK;
 }
 #endif
