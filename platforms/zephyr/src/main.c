@@ -570,6 +570,18 @@ static void hal_pump(void *c) {
   k_yield();
 }
 
+// "Enter Bootloader" INVOKE — boards with the UF2/DFU reboot (DUTA_HAVE_NRF_DFU_REBOOT)
+// advertise it so Sutra shows a one-click button. The reset is deferred a beat so the
+// OK reply flushes before the device drops to DFU (where it re-enumerates as a drive).
+#if defined(DUTA_HAVE_NRF_DFU_REBOOT)
+#define DUTA_INVOKE_BOOTLOADER (SKRIT_INVOKE_VENDOR_BASE + 3)
+static void dfu_reboot_fn(struct k_timer *t) {
+  ARG_UNUSED(t);
+  hal_reboot(NULL, SKRIT_REBOOT_BOOTLOADER); // GPREGRET = 0x57 + warm reset
+}
+K_TIMER_DEFINE(dfu_reboot_timer, dfu_reboot_fn, NULL);
+#endif
+
 // ---- demo INVOKE commands (user-defined; proves the framework extension point
 // on real hardware). The device owns these; Sutra forwards intents blind.
 //   0x0001 set_position(x:u16,y:u16)  well-known — blips the status LED as an ack
@@ -599,10 +611,20 @@ static uint8_t hal_cmd_desc(void *c, uint8_t index, uint16_t *id, uint8_t *nargs
     *id = SKRIT_INVOKE_VENDOR_BASE + 2; *nargs = 1;
     argtype[0] = SKRIT_ARG_BYTES; *flags = SKRIT_INVOKE_REPLY; *name = "echo";
     break;
+#if defined(DUTA_HAVE_NRF_DFU_REBOOT)
+  case 3:
+    *id = DUTA_INVOKE_BOOTLOADER; *nargs = 0;
+    *flags = 0; *name = "Enter Bootloader";
+    break;
+#endif
   default:
     break;
   }
+#if defined(DUTA_HAVE_NRF_DFU_REBOOT)
+  return 4;
+#else
   return 3;
+#endif
 }
 static uint8_t hal_cmd_invoke(void *c, uint16_t id, const uint8_t *p, uint8_t plen,
                               uint8_t *reply, uint8_t cap, uint8_t *rlen) {
@@ -628,6 +650,12 @@ static uint8_t hal_cmd_invoke(void *c, uint16_t id, const uint8_t *p, uint8_t pl
     *rlen = n;
     return SKRIT_ST_OK;
   }
+#if defined(DUTA_HAVE_NRF_DFU_REBOOT)
+  if (id == DUTA_INVOKE_BOOTLOADER) { // drop to UF2 DFU (after the OK reply flushes)
+    k_timer_start(&dfu_reboot_timer, K_MSEC(150), K_NO_WAIT);
+    return SKRIT_ST_OK;
+  }
+#endif
   return SKRIT_ST_NOTFOUND;
 }
 
