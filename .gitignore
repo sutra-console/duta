@@ -15,3 +15,6 @@ platforms/*/.pio/
 
 # Local pinned toolchain (see README)
 /.tools/
+
+# merge/patch backups
+*.orig

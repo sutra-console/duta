@@ -73,6 +73,9 @@ picker renders the menu with **zero hardcoded chip knowledge**. Two special rule
 3. Create `targets/duta_<board>.h` basing off the vendored board with your role pins.
 4. Add a `#elif defined(BOARD_<X>)` arm to that platform's `board.h` dispatcher and an
    `[env:<x>]` to `platformio.ini` passing `-DBOARD_<X>`.
+5. Document it: a `boards/<vendor>/<board>.md` next to the header, covering the specs,
+   the label-to-GPIO pinout (flag strapping/boot/committed pins with ⚠️ and a footnote
+   on why), onboard hardware, flashing, and the Duta role map.
 
 Steps 1-2 are upstreamable facts anyone can reuse; step 3 is the only Duta opinion.
 
