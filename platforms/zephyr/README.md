@@ -16,6 +16,16 @@ west flash                                                 # (DK; UF2 boards: se
 west build -b nrf52840dk/nrf52840 platforms/zephyr -- -DEXTRA_CONF_FILE=overlay-ble.conf
 ```
 
+### USB CDC stack (device_next)
+
+The USB builds use Zephyr's **device_next** stack (`CONFIG_USB_DEVICE_STACK_NEXT` +
+`USBD_CDC_ACM_CLASS`, with the board's auto-init off). `main.c` owns the USBD device
+(`USBD_DEVICE_DEFINE`, **VID `0x1209` / PID `0x5d11`** so Sutra discovers it) and calls
+`usbd_init`/`usbd_enable` directly. The **legacy** stack (`CONFIG_USB_DEVICE_STACK`) was
+hardware-verified to never deliver host→device RX on this board's CDC ACM (TX worked, so
+the host got no CMD responses) — don't switch back. The cdc_acm UART access
+(`uart_irq_*`, `uart_poll_out`) is stack-agnostic.
+
 ### Pro Micro nRF52840 (nice!nano v2 compatible)
 
 The `promicro_nrf52840/nrf52840` board is the upstream Zephyr target for the

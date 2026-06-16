@@ -21,6 +21,15 @@ A `NULL` callback degrades to a clean `unsupported`/`bad args` reply, never a cr
 New HAL fields are always **appended** (positional initializers zero-fill trailing
 fields), so older platform code keeps compiling.
 
+**Buffer sizing (`SKRIT_SEND_CAP`).** The device→host framing buffers live in the
+`skrit_dev` struct (`send_buf`/`send_cobs`), **not** on the caller's stack: `skrit__send`
+needs `~2·SKRIT_SEND_CAP` bytes, and on an RTOS those locals overflowed a small send-thread
+stack (a sniffer build raised `SKRIT_SEND_CAP` to 200 — to fit a 137 B record in one mux
+frame — and faulted a 1 KB thread on its first reply, wedging RX). So raising the cap grows
+the **dev struct** (static), not any stack; define it before including `skrit_device.h`.
+Contract: **sends to one dev must be serialized** (a platform lock or the single-threaded
+super-loop), since that scratch is shared per-dev.
+
 ## Table-driven IO (Arduino platforms)
 
 The Arduino ports (espressif, pico) don't hand-write the IO callbacks: a board declares
