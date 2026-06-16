@@ -41,14 +41,23 @@
 
 #define DUTA_N_GPIO_OUT 1 // onboard status LED (led0) — the onboard-only default
 #ifdef DUTA_SNIFFER
-#define SNIFF_OUT_IDX DUTA_N_GPIO_OUT // a virtual "Sniffing" output past the gpios
 #ifdef DUTA_SNIFF_MULTI
-// The unified sniffer adds a second virtual control: a radio-mode toggle
-// (off = BLE advertising, on = IEEE 802.15.4) so the PHY is switchable from the
-// Controls panel, not just CFG. It rides the same duta_sniffer_select() path.
-#define MODE_OUT_IDX (DUTA_N_GPIO_OUT + 1)
-#define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 2)
+// The unified sniffer has three virtual controls (past the GPIOs):
+//   Radio  (SELECT)  — picks the PHY: BLE-adv / Zigbee / Thread-Matter. Just the
+//                      protocol/dissector, NOT capture; a swap preserves capture.
+//   Sniffing (on/off)— owns capture, so "am I sniffing?" is always explicit.
+//   UART bridge (on/off) — the Console source, independent of the radio, so console
+//                      + sniffer run as CONCURRENT DATA sources.
+#define RADIO_SEL_IDX DUTA_N_GPIO_OUT
+#define SNIFF_OUT_IDX (DUTA_N_GPIO_OUT + 1)
+#define CONSOLE_TOG_IDX (DUTA_N_GPIO_OUT + 2)
+#define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 3)
+// DATA sources: console (UART, P0.06/P0.08) = 0, radio (sniffer) = 1.
+#define CONSOLE_SID 0
+#define RADIO_SID 1
+#define DUTA_N_SOURCES 2
 #else
+#define SNIFF_OUT_IDX DUTA_N_GPIO_OUT // single-PHY sniffer: a "Sniffing" on/off
 #define DUTA_N_OUTPUTS (DUTA_N_GPIO_OUT + 1)
 #endif
 #else
@@ -455,20 +464,22 @@ static uint16_t hal_data_read(void *c, uint8_t *out, uint16_t cap) {
 
 #ifdef DUTA_SNIFF_MULTI
 static void set_data_mode(uint8_t kind); // switch UART/BLE/802.15.4 + sync data_kind; after HAL
+static void radio_select(uint8_t opt);   // SELECT option (0=BLE-adv,1=Zigbee,2=Thread) -> PHY + dissector kind
+static const char RADIO_OPTS[] = "BLE-adv\0Zigbee\0Thread/Matter\0"; // NUL-sep, double-NUL term
+static uint8_t g_radio_opt;               // current radio PHY option (0 = BLE-adv at boot)
+static void hal_source_desc(void *c, uint8_t i, uint8_t *sid, uint8_t *kind, uint8_t *flags, const char **name);
 #endif
 
 static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
   ARG_UNUSED(c);
+#ifdef DUTA_SNIFF_MULTI
+  if (idx == RADIO_SEL_IDX) { radio_select(on); return; } // SELECT: `on` = PHY option, preserves capture
+  if (idx == CONSOLE_TOG_IDX) { uart_fwd = on ? 1 : 0; return; } // UART bridge (Console source) on/off
+#endif
 #ifdef DUTA_SNIFFER
-  if (idx == SNIFF_OUT_IDX) { // virtual "Sniffing" toggle drives the radio
+  if (idx == SNIFF_OUT_IDX) { // "Sniffing" on/off — owns capture
     if (on) duta_sniffer_start();
     else duta_sniffer_stop();
-    return;
-  }
-#endif
-#ifdef DUTA_SNIFF_MULTI
-  if (idx == MODE_OUT_IDX) { // virtual radio-mode toggle: off = BLE, on = 802.15.4
-    set_data_mode(on ? SKRIT_DATA_IEEE802154 : SKRIT_DATA_BLE_SNIFF);
     return;
   }
 #endif
@@ -478,34 +489,35 @@ static void hal_out_set(void *c, uint8_t idx, uint8_t on) {
 }
 static uint8_t hal_out_get(void *c, uint8_t idx) {
   ARG_UNUSED(c);
+#ifdef DUTA_SNIFF_MULTI
+  if (idx == RADIO_SEL_IDX) return g_radio_opt; // current PHY option
+  if (idx == CONSOLE_TOG_IDX) return uart_fwd ? 1 : 0;
+#endif
 #ifdef DUTA_SNIFFER
   if (idx == SNIFF_OUT_IDX) return duta_sniffer_is_on() ? 1 : 0;
-#endif
-#ifdef DUTA_SNIFF_MULTI
-  if (idx == MODE_OUT_IDX) return duta_sniffer_kind() == SKRIT_DATA_IEEE802154 ? 1 : 0;
 #endif
   return idx < DUTA_N_GPIO_OUT ? g_out[idx] : 0;
 }
 static void hal_out_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
   ARG_UNUSED(c);
-#ifdef DUTA_SNIFFER
-  if (idx == SNIFF_OUT_IDX) {
-    *type = SKRIT_CTRL_IO;
-    *name = "Sniffing";
-    return;
-  }
-#endif
 #ifdef DUTA_SNIFF_MULTI
-  if (idx == MODE_OUT_IDX) {
-    *type = SKRIT_CTRL_IO;
-    *name = "802.15.4 (off=BLE)"; // on = Zigbee/Thread/Matter PHY
-    return;
-  }
+  if (idx == RADIO_SEL_IDX) { *type = SKRIT_CTRL_SELECT; *name = "Radio"; return; }
+  if (idx == CONSOLE_TOG_IDX) { *type = SKRIT_CTRL_IO; *name = "UART bridge"; return; }
+#endif
+#ifdef DUTA_SNIFFER
+  if (idx == SNIFF_OUT_IDX) { *type = SKRIT_CTRL_IO; *name = "Sniffing"; return; }
 #endif
   if (idx >= DUTA_N_GPIO_OUT) return;
   *type = SKRIT_CTRL_IO;
   *name = OUT_NAME[idx];
 }
+#ifdef DUTA_SNIFF_MULTI
+// SELECT option labels for the radio control (the core appends these to OUT_DESC).
+static const char *hal_out_options(void *c, uint8_t idx) {
+  ARG_UNUSED(c);
+  return idx == RADIO_SEL_IDX ? RADIO_OPTS : NULL;
+}
+#endif
 
 #if HAVE_ADC
 static void hal_in_desc(void *c, uint8_t idx, uint8_t *type, const char **name) {
@@ -719,6 +731,9 @@ static skrit_hal HAL = {
 #endif
 #ifdef DUTA_SNIFF_MULTI
     .cfg_set = hal_cfg_set, // CFG key 0x14 switches BLE ↔ 802.15.4 at runtime
+    .out_options = hal_out_options, // option labels for the radio SELECT control
+    .source_desc = hal_source_desc, // two DATA sources: Console + Radio
+    .n_sources = DUTA_N_SOURCES,    // >1 => the core length-frames DATA by source_id
 #endif
     .caps = TRANSPORT_CAP_MUX | SKRIT_CAP_SERIAL | SKRIT_CAP_REBOOT,
     .macro_tier = SKRIT_TIER_INTERACTIVE,
@@ -772,6 +787,40 @@ static void set_data_mode(uint8_t kind) {
   // gets flooded the instant it changes mode, and boot can't stay quiet).
   if (!duta_sniffer_select(kind) && from_uart) duta_sniffer_init();
   HAL.data_kind = duta_sniffer_kind();
+}
+// Radio SELECT control: pick the PHY + the reported dissector kind ONLY — capture is
+// owned by the separate "Sniffing" toggle. Zigbee and Thread/Matter share the
+// 802.15.4 PHY (select 7) but report distinct kinds so the extcap auto-picks the
+// dissector. duta_sniffer_select PRESERVES the capture on/off state across the swap,
+// so changing PHY while sniffing keeps sniffing (on the new PHY).
+static void radio_select(uint8_t opt) {
+  uint8_t phy, kind;
+  switch (opt) {
+    case 0: phy = SKRIT_DATA_BLE_SNIFF;  kind = SKRIT_DATA_BLE_SNIFF; break;
+    case 1: phy = SKRIT_DATA_IEEE802154; kind = SKRIT_DATA_ZIGBEE;    break;
+    case 2: phy = SKRIT_DATA_IEEE802154; kind = SKRIT_DATA_THREAD;    break;
+    default: return;
+  }
+  duta_sniffer_select(phy); // switch PHY (no-op if already on it; preserves capture)
+  HAL.data_kind = kind;      // reported dissector/DLT (DATA_DESC / Radio source kind)
+  g_radio_opt = opt;
+  // The radio does NOT touch uart_fwd (Console = independent) nor capture (the
+  // "Sniffing" toggle owns it) — so console + sniffer stream concurrently and the
+  // sniff state stays explicit across a PHY swap.
+}
+
+// Describe the two DATA sources for SOURCE_DESC: console (UART bridge) + radio.
+static void hal_source_desc(void *c, uint8_t i, uint8_t *sid, uint8_t *kind, uint8_t *flags, const char **name) {
+  ARG_UNUSED(c);
+  if (i == CONSOLE_SID) {
+    *sid = CONSOLE_SID; *kind = SKRIT_DATA_UART;
+    *flags = SKRIT_SRC_TOGGLEABLE | (uart_fwd ? SKRIT_SRC_ACTIVE : 0);
+    *name = "Console";
+  } else {
+    *sid = RADIO_SID; *kind = HAL.data_kind; // the active sniffer PHY's dissector kind
+    *flags = SKRIT_SRC_TOGGLEABLE | (duta_sniffer_is_on() ? SKRIT_SRC_ACTIVE : 0);
+    *name = "Radio";
+  }
 }
 // CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): the host-config route to the same switch.
 static uint8_t hal_cfg_set(void *c, uint8_t key, const uint8_t *val, uint8_t len) {
@@ -860,7 +909,11 @@ static void sniff_thread(void *a, void *b, void *c) {
     uint16_t n;
     while ((n = duta_sniffer_take(rec, sizeof rec)) != 0) {
       DEV_LOCK();
+#ifdef DUTA_SNIFF_MULTI
+      skrit_dev_feed_source(&dev, RADIO_SID, rec, n); // Radio = source 1 (length-framed)
+#else
       skrit_dev_feed_data(&dev, rec, n);
+#endif
       DEV_UNLOCK();
     }
   }

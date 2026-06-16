@@ -27,6 +27,16 @@ enum {
   SKRIT_AUTH = 0x05,        // password(...): authenticate the session (network transports)
   SKRIT_AUTH_SET = 0x06,    // new_password(...): change the password (must be authed)
   SKRIT_DATA_DESC = 0x07,   // -> kind(1), name string: what the DATA channel carries
+  SKRIT_SOURCE_DESC = 0x08, // index(1) -> index, total(1)[, source_id(1), kind(1), flags(1), name]:
+                            //   enumerate the DATA SOURCES (streams), iterate 0..total-1 like
+                            //   PIN_CAPS. kind = a SKRIT_DATA_* · flags = SKRIT_SRC_*. total<=1 =>
+                            //   DATA stays UNFRAMED/raw (a dumb terminal still works); unsupported /
+                            //   not answered => one legacy console (kind per DATA_DESC). total>1 =>
+                            //   sources are tagged on the wire TRANSPORT-NATIVELY: mux + byte-stream
+                            //   links length-frame each record as [len(2 LE)][source_id(1)][payload];
+                            //   links with native multi-stream (BLE GATT) bind each source to its own
+                            //   channel (one characteristic per source). The MODEL (ids + this DESC)
+                            //   is transport-agnostic; only the on-wire framing differs.
   SKRIT_OUT_SET = 0x10,
   SKRIT_OUT_GET = 0x11,
   SKRIT_OUT_TOGGLE = 0x12,
@@ -203,12 +213,27 @@ enum {
   SKRIT_CTRL_IO = 0,  // digital on/off line
   SKRIT_CTRL_PWM = 1, // duty-cycle output (OUT_PWM, 0..1023)
   SKRIT_CTRL_RGB = 2, // addressable-LED strip (OUT_RGB, per-pixel)
+  SKRIT_CTRL_SELECT = 3, // enum: one of N labeled options (a dropdown). The value-shape
+                         //   for "pick one of a fixed set" — e.g. a radio's PHY. Set with
+                         //   OUT_SET(index, option) where the value byte is the option index.
+                         //   OUT_DESC for a SELECT extends the body: after the type byte it is
+                         //   current(1) then NUL-separated strings — name, then each option label
+                         //   (so: type, current, "name\0opt0\0opt1\0…"). Other types are unchanged.
 };
 // OUT_RGB pixel sentinel: address the whole strip (fill all pixels).
 #define SKRIT_RGB_ALL 0xFF
 
 // ---- input types (INPUT_DESC body[2]) ----
 enum { SKRIT_IN_DIGITAL = 0, SKRIT_IN_ANALOG = 1 };
+
+// ---- source flags (SOURCE_DESC flags byte) ----
+// A DATA SOURCE is a continuous device->host stream (kind = a SKRIT_DATA_*). The
+// device self-describes its sources via SOURCE_DESC; on/off and any mode (e.g. a
+// radio's PHY) are driven separately by Controls — the source itself is read-only.
+enum {
+  SKRIT_SRC_TOGGLEABLE = 0x01, // can be gated on/off by the host (via some Control)
+  SKRIT_SRC_ACTIVE = 0x02,     // currently emitting (reflects the live on/off state)
+};
 
 // ---- INVOKE arg types (INVOKE_DESC argtype bytes) ----
 // How a host packs each arg into the INVOKE payload. Fixed types are
@@ -249,7 +274,9 @@ enum {
   SKRIT_DATA_BLE_SNIFF = 4,   // sniffed BLE packets
   SKRIT_DATA_LOGIC = 5,       // logic-analyzer samples
   SKRIT_DATA_I2C = 6,         // I2C transactions (the first non-UART backend)
-  SKRIT_DATA_IEEE802154 = 7,  // sniffed IEEE 802.15.4 frames (Zigbee / Thread)
+  SKRIT_DATA_IEEE802154 = 7,  // sniffed IEEE 802.15.4 frames (generic O-QPSK PHY)
+  SKRIT_DATA_ZIGBEE = 8,      // 802.15.4 frames, Zigbee dissector/DLT — same radio PHY as 7
+  SKRIT_DATA_THREAD = 9,      // 802.15.4 frames, Thread/Matter dissector/DLT — same radio PHY as 7
 // i2c DATA records (kind = SKRIT_DATA_I2C): one mux DATA frame carries exactly
 // ONE record — the mux framing IS the record framing:
 //   ts_ms(4 LE) · addr(1) · flags(1) · wlen(1) · w-bytes · rlen(1) · r-bytes

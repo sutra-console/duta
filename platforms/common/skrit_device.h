@@ -190,6 +190,22 @@ typedef struct skrit_hal {
                       uint8_t *argtype, uint8_t *flags, const char **name);
   uint8_t (*cmd_invoke)(void *ctx, uint16_t id, const uint8_t *payload, uint8_t plen,
                         uint8_t *reply, uint8_t cap, uint8_t *rlen);
+
+  // ---- SELECT control options (NULL unless a SKRIT_CTRL_SELECT output exists) ----
+  // For a SELECT output, return its option labels as one buffer of NUL-separated
+  // strings, double-NUL terminated — e.g. "off\0BLE\0Zigbee\0Thread\0\0". The
+  // selected option index is read via out_get and set via out_set(idx, option).
+  // NULL (or a non-SELECT idx) => no options.
+  const char *(*out_options)(void *ctx, uint8_t idx);
+
+  // ---- DATA sources (multiplexed streams; NULL/0 = one legacy console). ----
+  // n_sources <= 1 => DATA stays one raw/unframed stream (terminal-safe, today's
+  // behaviour). n_sources > 1 => the core length-frames each record on a mux link
+  // as [len(2 LE)][source_id(1)][payload] (see skrit_dev_feed_source). source_desc
+  // fills the per-index descriptor that SOURCE_DESC reports.
+  uint8_t n_sources;
+  void (*source_desc)(void *ctx, uint8_t index, uint8_t *source_id, uint8_t *kind,
+                      uint8_t *flags, const char **name);
 } skrit_hal;
 
 // ---- device state ----------------------------------------------------------
@@ -298,6 +314,49 @@ static void skrit__console_out(skrit_dev *d, const uint8_t *p, uint16_t n) {
   }
 }
 
+// Push DATA bytes for SOURCE `sid` to the host. One source (n_sources<=1): raw /
+// unframed, exactly the legacy console. Multi-source: length-frame each chunk as
+// [len(2 LE)=payload bytes][source_id(1)][payload] so a byte-stream link self-
+// delimits (BLE binds a characteristic per source instead — handled in its
+// transport). Frames out of d->send_buf/send_cobs — NEVER the caller's stack (a
+// SKRIT_SEND_CAP-sized stack buffer on a 1 KB RTOS thread is what overflowed).
+static void skrit__source_out(skrit_dev *d, uint8_t sid, const uint8_t *p, uint16_t n) {
+  const skrit_hal *h = d->hal;
+  if (h->n_sources <= 1) { skrit__console_out(d, p, n); return; }
+  const uint16_t maxpl = (uint16_t)(SKRIT_SEND_CAP - 4); // mux chan(1)+len(2)+sid(1)
+  while (n) {
+    uint16_t c = n > maxpl ? maxpl : n;
+    if (d->muxed) {
+      d->send_buf[0] = SKRIT_MUX_DATA;
+      d->send_buf[1] = (uint8_t)(c & 0xFF);
+      d->send_buf[2] = (uint8_t)((c >> 8) & 0xFF);
+      d->send_buf[3] = sid;
+      memcpy(d->send_buf + 4, p, c);
+      size_t en = skrit_cobs_encode(d->send_buf, (size_t)(4 + c), d->send_cobs);
+      uint8_t z = 0;
+      if (h->link_write) {
+        h->link_write(d->ctx, &z, 1);
+        h->link_write(d->ctx, d->send_cobs, (uint16_t)en);
+        h->link_write(d->ctx, &z, 1);
+      }
+    } else if (h->host_write) { // non-muxed byte stream (dual-CDC): write the header then payload
+      uint8_t hdr[3] = { (uint8_t)(c & 0xFF), (uint8_t)((c >> 8) & 0xFF), sid };
+      h->host_write(d->ctx, hdr, 3);
+      h->host_write(d->ctx, p, c);
+    }
+    p += c;
+    n -= c;
+  }
+}
+
+// Emit DATA on a specific source (sniffer frames, extra streams). Gated on the
+// host having opted in (forward) and not auth-gated — same as the console path —
+// so nothing streams until a host is listening. No EXPECT/macro tee (that's the
+// console's job, skrit_dev_feed_data → source 0).
+static void skrit_dev_feed_source(skrit_dev *d, uint8_t source_id, const uint8_t *p, uint16_t n) {
+  if (n && d->forward && !skrit__gated(d)) skrit__source_out(d, source_id, p, n);
+}
+
 // Emit an unsolicited device->host event (TYPE in 0x50..0x5F, SEQ=0).
 static inline void skrit_dev_emit_event(skrit_dev *d, uint8_t type, const uint8_t *body, uint8_t n) {
   if (type < SKRIT_EVENT_LO || type > SKRIT_EVENT_HI) return;
@@ -326,7 +385,7 @@ static void skrit_dev_feed_data(skrit_dev *d, const uint8_t *buf, uint16_t got) 
   if (!got) return;
   // Tee to the host unless gated (unauthed) or forwarding is off for this iface.
   // EXPECT still runs below either way, so a macro can watch a non-forwarded link.
-  if (d->forward && !skrit__gated(d)) skrit__console_out(d, buf, got);
+  if (d->forward && !skrit__gated(d)) skrit__source_out(d, 0, buf, got); // console = source 0
   if (d->exp_pat && !d->exp_hit) {
     for (uint16_t i = 0; i < got; i++) {
       uint8_t c = buf[i];
@@ -542,6 +601,22 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
     skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
     break;
   }
+  case SKRIT_SOURCE_DESC: {
+    // Enumerate DATA sources, menu-style: index -> index, total, source_id, kind, flags, name.
+    if (!h->source_desc || h->n_sources == 0) { skrit__status(d, type, seq, SKRIT_ST_UNSUPPORTED); break; }
+    if (len < 1 || b[0] >= h->n_sources) { skrit__status(d, type, seq, SKRIT_ST_BADARGS); break; }
+    uint8_t sid = 0, kind = 0, flags = 0; const char *nm = "";
+    h->source_desc(d->ctx, b[0], &sid, &kind, &flags, &nm);
+    body[bl++] = SKRIT_ST_OK;
+    body[bl++] = b[0];          // index
+    body[bl++] = h->n_sources;  // total
+    body[bl++] = sid;           // source_id (the byte that tags this stream when total>1)
+    body[bl++] = kind;          // SKRIT_DATA_*
+    body[bl++] = flags;         // SKRIT_SRC_*
+    while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+    skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
+    break;
+  }
   case SKRIT_DEVICE_NAME: {
     body[bl++] = SKRIT_ST_OK;
     const char *s = h->name ? h->name : "Duta";
@@ -557,7 +632,7 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
 
   case SKRIT_OUT_SET:
     if (len >= 2 && b[0] < h->n_outputs && h->out_set) {
-      h->out_set(d->ctx, b[0], b[1] ? 1 : 0);
+      h->out_set(d->ctx, b[0], b[1]); // raw value: 0/1 for IO, option index for SELECT
       skrit__status(d, type, seq, SKRIT_ST_OK);
     } else skrit__status(d, type, seq, SKRIT_ST_BADARGS);
     break;
@@ -601,7 +676,20 @@ static void skrit__dispatch(skrit_dev *d, const uint8_t *raw, uint16_t n) {
       body[bl++] = SKRIT_ST_OK;
       body[bl++] = b[0];
       body[bl++] = ot;
-      while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+      if (ot == SKRIT_CTRL_SELECT) {
+        // SELECT body: current(1), then NUL-separated name + each option label.
+        body[bl++] = h->out_get ? h->out_get(d->ctx, b[0]) : 0;
+        while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+        if (bl < SKRIT_MAX_BODY) body[bl++] = 0; // terminate the name
+        const char *op = h->out_options ? h->out_options(d->ctx, b[0]) : 0;
+        while (op && bl < SKRIT_MAX_BODY) {       // copy labels up to the double-NUL
+          uint8_t c = (uint8_t)*op++;
+          body[bl++] = c;
+          if (c == 0 && (uint8_t)*op == 0) break;
+        }
+      } else {
+        while (*nm && bl < SKRIT_MAX_BODY) body[bl++] = (uint8_t)*nm++;
+      }
       skrit__respond(d, type | SKRIT_RESP, seq, body, bl);
     } else skrit__status(d, type, seq, SKRIT_ST_BADARGS);
     break;

@@ -35,6 +35,17 @@ static uint8_t m_rgbset(void*c,uint8_t i,uint8_t px,uint8_t r,uint8_t g,uint8_t 
 static void m_rgbget(void*c,uint8_t i,uint8_t px,uint8_t*r,uint8_t*g,uint8_t*b){
   (void)c;(void)i; if(px>=RGB_N)px=0; *r=rgb[px][0];*g=rgb[px][1];*b=rgb[px][2];}
 static uint32_t m_millis(void*c){(void)c;return fake_ms++;} // advances so waits terminate
+// mock SELECT output: one "Mode" control, options off/BLE/Zigbee/Thread (double-NUL block)
+static uint8_t sel_val=1;
+static void sel_oset(void*c,uint8_t i,uint8_t v){(void)c;(void)i;sel_val=v;}
+static uint8_t sel_oget(void*c,uint8_t i){(void)c;(void)i;return sel_val;}
+static void sel_odesc(void*c,uint8_t i,uint8_t*t,const char**n){(void)c;(void)i;*t=SKRIT_CTRL_SELECT;*n="Mode";}
+static const char* sel_opts(void*c,uint8_t i){(void)c;(void)i;return "off\0BLE\0Zigbee\0Thread\0";}
+// mock DATA sources: console (id 0, UART) + radio (id 1, ble-sniff, toggleable+active)
+static void src_desc(void*c,uint8_t i,uint8_t*sid,uint8_t*kind,uint8_t*fl,const char**nm){
+  (void)c;
+  if(i==0){*sid=0;*kind=SKRIT_DATA_UART;*fl=0;*nm="Console";}
+  else {*sid=1;*kind=SKRIT_DATA_BLE_SNIFF;*fl=SKRIT_SRC_TOGGLEABLE|SKRIT_SRC_ACTIVE;*nm="Radio";}}
 // mock network auth: a mutable password store, factory default "duta"
 static char g_pw[33]="duta"; static uint8_t g_pwlen=4, g_default=1;
 static uint8_t m_authchk(void*c,const char*p,uint8_t n){(void)c;return n==g_pwlen && memcmp(p,g_pw,n)==0;}
@@ -151,6 +162,67 @@ int main(void){
   link_n=0; feed_cmd(&dev,SKRIT_OUT_GET,3,NULL,0,1); rn=last_resp(r,1);
   assert(r[3]==SKRIT_ST_OK && r[4]==0x02); // bit1 set
   printf("mux OUTPUT set/get ok (bitmap=%d)\n",r[4]);
+
+  // ---- MUX: SELECT control — OUT_DESC carries current + option labels ----
+  {
+    skrit_hal sh={0}; sh.name="sel"; sh.caps=SKRIT_CAP_MUX; sh.n_outputs=1;
+    sh.link_write=m_link; sh.out_set=sel_oset; sh.out_get=sel_oget;
+    sh.out_desc=sel_odesc; sh.out_options=sel_opts; sh.millis=m_millis;
+    skrit_dev sd; skrit_dev_init(&sd,&sh,NULL,1);
+    uint8_t db[1]={0};
+    link_n=0; feed_cmd(&sd,SKRIT_OUT_DESC,5,db,1,1); last_resp(r,1);
+    // body: st, idx=0, type=SELECT, current=1, then "Mode\0off\0BLE\0Zigbee\0Thread"
+    assert(r[3]==SKRIT_ST_OK && r[4]==0 && r[5]==SKRIT_CTRL_SELECT && r[6]==1);
+    assert(memcmp(&r[7],"Mode\0off\0BLE\0Zigbee\0Thread",26)==0);
+    // set the selection to option 3 (Thread); OUT_DESC reflects the new current
+    uint8_t ss[2]={0,3}; link_n=0; feed_cmd(&sd,SKRIT_OUT_SET,6,ss,2,1);
+    assert(sel_val==3);
+    link_n=0; feed_cmd(&sd,SKRIT_OUT_DESC,7,db,1,1); last_resp(r,1);
+    assert(r[6]==3);
+    printf("mux SELECT desc/set ok (current 1->3, opts off/BLE/Zigbee/Thread)\n");
+  }
+
+  // ---- MUX: SOURCE_DESC enumerates DATA streams ----
+  {
+    skrit_hal sh={0}; sh.name="src"; sh.caps=SKRIT_CAP_MUX; sh.link_write=m_link; sh.millis=m_millis;
+    sh.n_sources=2; sh.source_desc=src_desc;
+    skrit_dev sd; skrit_dev_init(&sd,&sh,NULL,1);
+    uint8_t db[1]={1}; link_n=0; feed_cmd(&sd,SKRIT_SOURCE_DESC,8,db,1,1); last_resp(r,1);
+    // body: st, index=1, total=2, source_id=1, kind=ble-sniff, flags, "Radio"
+    assert(r[3]==SKRIT_ST_OK && r[4]==1 && r[5]==2 && r[6]==1);
+    assert(r[7]==SKRIT_DATA_BLE_SNIFF && r[8]==(SKRIT_SRC_TOGGLEABLE|SKRIT_SRC_ACTIVE));
+    assert(memcmp(&r[9],"Radio",5)==0);
+    uint8_t db2[1]={5}; link_n=0; feed_cmd(&sd,SKRIT_SOURCE_DESC,9,db2,1,1); last_resp(r,1);
+    assert(r[3]==SKRIT_ST_BADARGS); // index out of range
+    printf("mux SOURCE_DESC ok (2 sources, Radio=ble-sniff)\n");
+  }
+
+  // ---- MUX: multi-source DATA emit is length-framed [len][source_id][payload] ----
+  {
+    skrit_hal sh={0}; sh.caps=SKRIT_CAP_MUX; sh.link_write=m_link; sh.millis=m_millis;
+    sh.n_sources=2; sh.source_desc=src_desc; // >1 source => framing on
+    skrit_dev sd; skrit_dev_init(&sd,&sh,NULL,1); sd.forward=1; // host opted in
+    uint8_t rec[3]={0xAA,0xBB,0xCC};
+    link_n=0; skrit_dev_feed_source(&sd,1,rec,3);
+    int rn=last_resp(r,1); // mux channel byte stripped -> [len_lo,len_hi,sid,payload...]
+    assert(rn==2+1+3);
+    assert(r[0]==3 && r[1]==0); // len = payload byte count = 3
+    assert(r[2]==1);            // source_id = 1
+    assert(r[3]==0xAA && r[4]==0xBB && r[5]==0xCC);
+    printf("mux multi-source emit ok ([len=3][sid=1][AA BB CC])\n");
+  }
+
+  // ---- single-source device is wire-identical to before (no prefix) ----
+  {
+    skrit_hal sh={0}; sh.caps=SKRIT_CAP_MUX; sh.link_write=m_link; sh.millis=m_millis;
+    sh.n_sources=1; sh.source_desc=src_desc; // <=1 => raw, unframed
+    skrit_dev sd; skrit_dev_init(&sd,&sh,NULL,1);
+    sd.forward=1; uint8_t rec[3]={0xAA,0xBB,0xCC};
+    link_n=0; skrit_dev_feed_source(&sd,0,rec,3);
+    int rn=last_resp(r,1);
+    assert(rn==3 && r[0]==0xAA && r[1]==0xBB && r[2]==0xCC); // raw payload, no [len][sid]
+    printf("single-source DATA raw/unframed ok\n");
+  }
 
   // ---- MUX: host->target DATA channel passes through to UART ----
   target_n=0;
