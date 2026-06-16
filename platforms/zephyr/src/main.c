@@ -343,17 +343,23 @@ static void transport_start(void) {
 #define TRANSPORT_CAP_MUX 0         // not muxed
 #define TRANSPORT_HOST_WRITE ble_data_notify // dual: console out is its own pipe
 
-#else // ---- USB CDC ACM transport (default) ----
+#else // ---- USB CDC ACM transport (default), new "device_next" USB stack ----
 
-// The CDC ACM that carries the mux link. Our overlays add `cdc_acm_uart0`; boards
-// that include Zephyr's common cdc_acm_serial.dtsi (e.g. promicro_nrf52840) name
-// it `board_cdc_acm_uart` instead — accept either.
+// The CDC ACM that carries the mux link. Our overlays may add `cdc_acm_uart0`;
+// boards that include Zephyr's common cdc_acm_serial.dtsi (e.g. promicro_nrf52840)
+// name it `board_cdc_acm_uart` instead — accept either.
+//
+// We use the new device_next stack and bring USB up ourselves. The LEGACY stack
+// (CONFIG_USB_DEVICE_STACK) was hardware-verified to never deliver RX interrupts
+// on this board's CDC ACM — TX worked (poll_out) but host->device bytes never
+// reached cmd_uart_isr (isr stayed 0), so the host got no CMD responses. The
+// board's own defconfig targets device_next; the .conf now follows it and
+// disables the board's auto-init (CDC_ACM_SERIAL_INITIALIZE_AT_BOOT=n) so we own
+// the device descriptors (VID 0x1209, for Sutra discovery).
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(cdc_acm_uart0), okay)
-#include <zephyr/usb/usb_device.h>
 #define CMD_DEV DEVICE_DT_GET(DT_NODELABEL(cdc_acm_uart0))
 #define HAVE_USB 1
 #elif DT_NODE_HAS_STATUS(DT_NODELABEL(board_cdc_acm_uart), okay)
-#include <zephyr/usb/usb_device.h>
 #define CMD_DEV DEVICE_DT_GET(DT_NODELABEL(board_cdc_acm_uart))
 #define HAVE_USB 1
 #else
@@ -368,9 +374,45 @@ static void hal_link_write(void *c, const uint8_t *p, uint16_t n) {
   for (uint16_t i = 0; i < n; i++) uart_poll_out(cmd_dev, p[i]);
 }
 
+#if HAVE_USB
+#include <zephyr/usb/usbd.h>
+#include <zephyr/usb/usb_ch9.h>
+
+// device_next device: VID 0x1209 / PID 0x5d11 so Sutra discovers it as a Duta.
+// One full-speed config; usbd_register_all_classes() wires in the cdc-acm
+// function derived from the board's CDC ACM DTS node.
+USBD_DEVICE_DEFINE(duta_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)), 0x1209, 0x5d11);
+USBD_DESC_LANG_DEFINE(duta_usb_lang);
+USBD_DESC_MANUFACTURER_DEFINE(duta_usb_mfr, "Duta");
+USBD_DESC_PRODUCT_DEFINE(duta_usb_product, "Duta Pro Micro nRF52840");
+USBD_DESC_CONFIG_DEFINE(duta_usb_cfg_desc, "Duta");
+USBD_CONFIGURATION_DEFINE(duta_usb_fs_config, 0 /*bus-powered*/, 250 /*x2mA*/, &duta_usb_cfg_desc);
+
+static void duta_usb_init(void) {
+  if (usbd_add_descriptor(&duta_usbd, &duta_usb_lang) ||
+      usbd_add_descriptor(&duta_usbd, &duta_usb_mfr) ||
+      usbd_add_descriptor(&duta_usbd, &duta_usb_product) ||
+      usbd_add_configuration(&duta_usbd, USBD_SPEED_FS, &duta_usb_fs_config) ||
+      usbd_register_all_classes(&duta_usbd, USBD_SPEED_FS, 1, NULL)) {
+    printk("Duta: usbd setup failed\n");
+    return;
+  }
+  // CDC ACM is a multi-interface class — advertise the IAD code triple.
+  usbd_device_set_code_triple(&duta_usbd, USBD_SPEED_FS, USB_BCC_MISCELLANEOUS, 0x02, 0x01);
+  if (usbd_init(&duta_usbd)) {
+    printk("Duta: usbd_init failed\n");
+    return;
+  }
+  // Enable directly: the device is always bus-powered (plugged in = VBUS present),
+  // so don't defer to a VBUS-ready message — that message path needs the USBD
+  // message thread and wasn't firing here, leaving the device un-enumerated.
+  if (usbd_enable(&duta_usbd)) printk("Duta: usbd_enable failed\n");
+}
+#endif // HAVE_USB
+
 static void transport_start(void) {
 #if HAVE_USB
-  if (usb_enable(NULL)) printk("Duta: usb_enable failed\n");
+  duta_usb_init();
 #endif
 }
 
@@ -720,12 +762,15 @@ static void set_data_mode(uint8_t kind) {
     HAL.data_kind = SKRIT_DATA_UART;
     return;
   }
+  bool from_uart = uart_fwd;
   uart_fwd = false;
-  duta_sniffer_select(kind);                  // updates `active` (no-op if already kind)
-  if (!duta_sniffer_is_on()) {                // coming back from UART: bring the radio up
-    duta_sniffer_init();
-    duta_sniffer_start();
-  }
+  // select() switches PHY and PRESERVES capture on/off (only restarts if it was
+  // already capturing). If it's a no-op (already this PHY) but we're returning
+  // from the UART bridge, re-init so the radio is configured for the new mode.
+  // Capture stays OFF until the "Sniffing" control (SNIFF_OUT_IDX) turns it on —
+  // selecting a PHY must never start streaming on its own (else a connected host
+  // gets flooded the instant it changes mode, and boot can't stay quiet).
+  if (!duta_sniffer_select(kind) && from_uart) duta_sniffer_init();
   HAL.data_kind = duta_sniffer_kind();
 }
 // CFG_SET key 0x14 (SKRIT_CFG_DATA_KIND): the host-config route to the same switch.
@@ -762,13 +807,17 @@ static K_SEM_DEFINE(cmd_rx_sem, 0, 1);
 
 static void cmd_uart_isr(const struct device *uart, void *user) {
   ARG_UNUSED(user);
-  if (!uart_irq_update(uart)) return;
   uint8_t buf[64];
   bool got = false;
-  while (uart_irq_rx_ready(uart)) {
+  // Drain RX while the IRQ has pending events. TX is poll_out (hal_link_write).
+  // (The "CDC RX dies after the first command" bug in the sniffer builds was NOT
+  // here — it was a stack overflow in skrit__send with SKRIT_SEND_CAP=200; fixed by
+  // framing out of the dev struct. See skrit_device.h + the duta-probe bisect.)
+  while (uart_irq_update(uart) && uart_irq_is_pending(uart)) {
+    if (!uart_irq_rx_ready(uart)) continue;
     int n = uart_fifo_read(uart, buf, sizeof buf);
     if (n <= 0) break;
-    ring_buf_put(&cmd_rx_rb, buf, (uint32_t)n); // bounded; overrun drops tail, never corrupts head
+    ring_buf_put(&cmd_rx_rb, buf, (uint32_t)n); // bounded; overrun drops tail
     got = true;
   }
   if (got) k_sem_give(&cmd_rx_sem);
@@ -787,6 +836,9 @@ static void cmd_rx_thread(void *a, void *b, void *c) {
     }
   }
 }
+// 1024 suffices now that skrit__send() frames out of the dev struct, not the stack.
+// (Before that fix, SKRIT_SEND_CAP=200 put ~410 B of framing buffers on this stack
+// and overflowed it on the first CMD response, wedging CDC RX — duta-probe bisect.)
 K_THREAD_DEFINE(cmd_rx_tid, 1024, cmd_rx_thread, NULL, NULL, NULL, 6, 0, 0);
 #endif // !CONFIG_BT && HAVE_USB
 
@@ -858,9 +910,15 @@ int main(void) {
   // Sniffer build: DATA is captured radio frames (no UART) — the sniff_thread
   // drains them into the core (woken by duta_sniffer_notify() or its 100 ms
   // tick). CMD rides the interrupt-fed cmd_rx_thread. The "Sniffing" virtual
-  // output (SNIFF_OUT_IDX) starts/stops capture; default on.
+  // output (SNIFF_OUT_IDX) starts/stops capture.
+  //
+  // Boot with capture OFF: a sniffer that streams on boot floods the mux DATA
+  // channel (~KB/s of BLE adv frames) before any host attaches, and that backlog
+  // sits in front of the CMD PONG so the host's connect probe times out ("no
+  // candidate answered skrit-mux"). Quiet on boot → CMD answers instantly → the
+  // host connects, then turns sniffing on via the control. (Hardware-verified:
+  // capture-on boot streamed 2.3 KB in 700 ms and broke the mux PING probe.)
   duta_sniffer_init();
-  duta_sniffer_start();
 #ifdef DUTA_SNIFF_MULTI
   // The unified build can also be a UART bridge (CFG 0x14 = 0): when in that mode
   // the radio is parked and this loop tees the hardware DATA UART to the host

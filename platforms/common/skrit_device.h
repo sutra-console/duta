@@ -217,6 +217,14 @@ typedef struct skrit_dev {
   // macro VM: EXPECT matcher fed by skrit_dev_poll()
   const uint8_t *exp_pat;
   uint8_t exp_n, exp_pos, exp_hit;
+
+  // framing scratch for skrit__send(). Kept here (not on the caller's stack):
+  // a SKRIT_SEND_CAP-sized pair on a small RTOS thread stack overflowed it (a
+  // 200-byte cap → ~410 B of locals → faulted the 1 KB cmd/sniffer threads).
+  // Contract: sends to one dev are serialized (every platform already does —
+  // a dev lock or a single-threaded super-loop), so one scratch pair is safe.
+  uint8_t send_buf[1 + SKRIT_SEND_CAP];      // muxed: channel byte + raw frame
+  uint8_t send_cobs[1 + SKRIT_SEND_CAP + 8]; // COBS-encoded wire bytes
 } skrit_dev;
 
 // ---- forward decls ---------------------------------------------------------
@@ -238,22 +246,22 @@ static inline uint8_t skrit__gated(skrit_dev *d) { return d->hal->auth_required 
 // Frame `raw` (TYPE SEQ LEN BODY CRC, or a DATA blob) onto the CMD endpoint.
 // `channel` is ignored on a dual link; on a mux link it is prepended pre-COBS.
 static void skrit__send(skrit_dev *d, uint8_t channel, const uint8_t *raw, uint16_t n) {
-  uint8_t buf[1 + SKRIT_SEND_CAP];
-  uint8_t cobs[1 + SKRIT_SEND_CAP + 8];
+  // d->send_buf / d->send_cobs (not stack locals): a SEND_CAP of 200 made these
+  // ~410 B and overflowed the 1 KB cmd/sniffer thread stacks. See skrit_dev.
   uint16_t plen = n;
   const uint8_t *payload = raw;
   if (d->muxed) {
-    if ((uint16_t)(n + 1) > sizeof buf) return;
-    buf[0] = channel;
-    memcpy(buf + 1, raw, n);
-    payload = buf;
+    if ((uint16_t)(n + 1) > sizeof d->send_buf) return;
+    d->send_buf[0] = channel;
+    memcpy(d->send_buf + 1, raw, n);
+    payload = d->send_buf;
     plen = (uint16_t)(n + 1);
   }
-  size_t en = skrit_cobs_encode(payload, plen, cobs);
+  size_t en = skrit_cobs_encode(payload, plen, d->send_cobs);
   uint8_t z = 0x00;
   if (d->hal->link_write) {
     d->hal->link_write(d->ctx, &z, 1);
-    d->hal->link_write(d->ctx, cobs, (uint16_t)en);
+    d->hal->link_write(d->ctx, d->send_cobs, (uint16_t)en);
     d->hal->link_write(d->ctx, &z, 1);
   }
 }
